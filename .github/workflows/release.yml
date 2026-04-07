@@ -1,0 +1,162 @@
+# Crucible CI/CD Pipeline
+# Builds an AppImage on tag push (e.g. v1.0.0)
+# Build logs are public for transparency and auditability.
+
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+*"
+
+permissions:
+  contents: write
+
+env:
+  APPIMAGE_NAME: Crucible-x86_64.AppImage
+
+jobs:
+  build:
+    name: Build AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq icoutils wget file libfuse2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build-time Python dependencies
+        run: pip install --quiet Pillow==11.1.0
+
+      - name: Install runtime Python dependencies into AppDir
+        run: |
+          pip install --quiet --target=AppDir/usr/lib/python \
+            PyQt6==6.8.1 \
+            requests==2.32.3 \
+            Pillow==11.1.0
+
+      - name: Assemble AppDir
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/src
+
+          # Copy application source
+          cp -r python/crucible AppDir/usr/src/crucible
+
+          # Bundle icoutils
+          for tool in wrestool icotool; do
+            bin=$(which "$tool" 2>/dev/null)
+            if [ -n "$bin" ]; then
+              cp "$bin" AppDir/usr/bin/
+              ldd "$bin" 2>/dev/null | grep "=>" | awk '{print $3}' | while read -r lib; do
+                basename=$(basename "$lib")
+                case "$basename" in
+                  libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libgcc_s.so*|\
+                  libstdc++.so*|ld-linux*.so*|libz.so*|libresolv.so*|libnss*.so*|\
+                  libutil.so*|libcrypt.so*) continue ;;
+                esac
+                [ -f "$lib" ] && cp --no-clobber "$lib" AppDir/usr/bin/ 2>/dev/null || true
+              done
+            fi
+          done
+
+          # Convert icon
+          python -c "
+          from PIL import Image
+          img = Image.open('python/crucible/assets/images/icon.jpg').convert('RGBA')
+          img = img.resize((256, 256), Image.LANCZOS)
+          img.save('AppDir/crucible.png')
+          "
+
+          # Create AppRun
+          cat > AppDir/AppRun << 'APPRUN'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export APPDIR="$HERE"
+          export PYTHONPATH="$HERE/usr/src:$HERE/usr/lib/python:${PYTHONPATH}"
+          export PATH="$HERE/usr/bin:${PATH}"
+          LIBDIR="$HERE/usr/lib/python/PyQt6/Qt6/lib"
+          export LD_LIBRARY_PATH="$LIBDIR:${LD_LIBRARY_PATH}"
+          export QT_QPA_PLATFORM_PLUGIN_PATH="$HERE/usr/lib/python/PyQt6/Qt6/plugins/platforms"
+          export QT_PLUGIN_PATH="$HERE/usr/lib/python/PyQt6/Qt6/plugins"
+          unset LD_PRELOAD
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+              export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+              export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+          elif [ -f /etc/pki/tls/certs/ca-bundle.crt ]; then
+              export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
+              export REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt
+          elif [ -f /etc/ssl/ca-bundle.pem ]; then
+              export SSL_CERT_FILE=/etc/ssl/ca-bundle.pem
+              export REQUESTS_CA_BUNDLE=/etc/ssl/ca-bundle.pem
+          fi
+          exec python3 -m crucible "$@"
+          APPRUN
+          chmod +x AppDir/AppRun
+
+          # Create .desktop file
+          cat > AppDir/crucible.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=Crucible
+          Exec=crucible
+          Icon=crucible
+          Type=Application
+          Categories=Game;
+          Comment=Wine/Proton game launcher
+          DESKTOP
+
+          # Create .DirIcon symlink
+          ln -sf crucible.png AppDir/.DirIcon
+
+      - name: Build AppImage
+        run: |
+          wget -q "https://github.com/AppImage/appimagetool/releases/latest/download/appimagetool-x86_64.AppImage" -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "$APPIMAGE_NAME"
+
+      - name: Generate checksum
+        run: |
+          sha256sum "$APPIMAGE_NAME" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            ${{ env.APPIMAGE_NAME }}
+            SHA256SUMS
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Crucible ${{ github.ref_name }}"
+          body: |
+            ## Crucible ${{ github.ref_name }}
+
+            ### Verification
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
+
+            Build workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            ${{ env.APPIMAGE_NAME }}
+            SHA256SUMS

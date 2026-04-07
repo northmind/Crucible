@@ -1,0 +1,17 @@
+# Ignore everything by default
+*
+
+# Allow only these
+!.gitignore
+!.github/
+!.github/**
+!README.md
+!python/
+!python/**
+
+# Re-ignore build artifacts inside python/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+python/build/
