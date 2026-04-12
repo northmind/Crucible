@@ -82,7 +82,10 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
             self.game_manager,
             self.proton_manager,
         )
-        self.settings_panel = SettingsPanel()
+        self.settings_panel = SettingsPanel(
+            global_config=self.game_manager.global_config,
+            proton_manager=self.proton_manager,
+        )
         self.settings_panel.accent_changed.connect(self.on_accent_changed)
         self.proton_panel = ProtonPanel(self.proton_manager)
 

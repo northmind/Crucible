@@ -134,6 +134,11 @@ class GameManager(GameLifecycleMixin):
         fingerprint_lock: bool = False,
         wrapper_command: str = "",
         exe_match_mode: str = "auto",
+        enable_gamemode: bool = False,
+        enable_gamescope: bool = False,
+        gamescope_settings: dict | None = None,
+        pre_launch_script: str = "",
+        post_launch_script: str = "",
     ) -> bool:
         """Create a new game JSON config and rescan the game list.
 
@@ -149,6 +154,11 @@ class GameManager(GameLifecycleMixin):
             fingerprint_lock: Whether to enable bwrap fingerprint locking.
             wrapper_command: Optional wrapper command (e.g. mangohud).
             exe_match_mode: Executable match mode ("auto" or "exact").
+            enable_gamemode: Whether to enable gamemode for this game.
+            enable_gamescope: Whether to enable gamescope for this game.
+            gamescope_settings: Gamescope configuration dict.
+            pre_launch_script: Path to script run before launch.
+            post_launch_script: Path to script run after exit.
 
         Returns:
             True on success, False if the proton version is not found or
@@ -173,6 +183,11 @@ class GameManager(GameLifecycleMixin):
             'fingerprint_lock': fingerprint_lock,
             'wrapper_command': wrapper_command,
             'exe_match_mode': exe_match_mode,
+            'enable_gamemode': enable_gamemode,
+            'enable_gamescope': enable_gamescope,
+            'gamescope_settings': gamescope_settings or {},
+            'pre_launch_script': pre_launch_script,
+            'post_launch_script': post_launch_script,
         }
 
         try:

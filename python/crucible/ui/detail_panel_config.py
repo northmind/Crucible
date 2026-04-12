@@ -6,6 +6,12 @@ from crucible.core.paths import safe_name
 from crucible.ui.detail_actions import build_danger_section, build_shortcut_section, build_tools_section
 from crucible.ui.detail_forms import build_config_section, build_launch_section
 from crucible.ui.detail_logs import build_logs_section
+from crucible.ui.detail_perf import (
+    build_gamescope_section,
+    build_perf_section,
+    build_scripts_section,
+    build_security_section,
+)
 from crucible.ui.game_config import (
     _ENV_OPTIONS,
     collect_env_vars,
@@ -32,6 +38,10 @@ class ConfigMixin:
         self._section_headers = {}
         self._wt_row = None
         self._proton_group = None
+        self._perf_ctrl = {}
+        self._gs_ctrl = {}
+        self._scripts_ctrl = {}
+        self._sec_ctrl = {}
 
         if not self._game:
             self._content_layout.addStretch()
@@ -78,6 +88,18 @@ class ConfigMixin:
             on_winetricks_toggled=self._on_winetricks_toggled,
         )
         self._add_section('tools', tools_widget, expanded=previous_states.get('tools', False))
+
+        perf_w, self._perf_ctrl = build_perf_section(self._game)
+        self._add_section('performance', perf_w, expanded=previous_states.get('performance', False))
+
+        gs_w, self._gs_ctrl = build_gamescope_section(self._game)
+        self._add_section('gamescope', gs_w, expanded=previous_states.get('gamescope', False))
+
+        scripts_w, self._scripts_ctrl = build_scripts_section(self._game, self._on_browse)
+        self._add_section('scripts', scripts_w, expanded=previous_states.get('scripts', False))
+
+        sec_w, self._sec_ctrl = build_security_section(self._game)
+        self._add_section('security', sec_w, expanded=previous_states.get('security', False))
 
         shortcut_widget = build_shortcut_section(
             has_shortcut=self._game_manager.has_game_shortcut(self._game.get('name', '')),
@@ -148,6 +170,16 @@ class ConfigMixin:
         if self._wt_proc and self._wt_row is not None:
             self._wt_row.setChecked(True)
 
+        # Performance / gamescope / scripts / security toggles + edits
+        for toggle in (self._perf_ctrl["gamemode"], self._perf_ctrl["gamescope"],
+                       self._gs_ctrl["grab_cursor"], self._sec_ctrl["fingerprint"]):
+            toggle.toggled.connect(queue_save)
+        for key in ("game_w", "game_h", "up_w", "up_h", "method", "window",
+                     "fps", "fps_nofocus", "additional"):
+            self._gs_ctrl[key].textChanged.connect(queue_save)
+        for key in ("pre_script", "post_script"):
+            self._scripts_ctrl[key].textChanged.connect(queue_save)
+
     def _on_browse(self, key: str, target: QLineEdit) -> None:
         if key == 'EXE':
             path = get_executable_path(self)
@@ -180,6 +212,20 @@ class ConfigMixin:
 
         checked = self._proton_group.checkedButton() if self._proton_group else None
         new_proton = checked.text() if checked else ''
+
+        gs_settings = {
+            "game_width": self._gs_ctrl["game_w"].text().strip(),
+            "game_height": self._gs_ctrl["game_h"].text().strip(),
+            "upscale_width": self._gs_ctrl["up_w"].text().strip(),
+            "upscale_height": self._gs_ctrl["up_h"].text().strip(),
+            "upscale_method": self._gs_ctrl["method"].text().strip(),
+            "window_type": self._gs_ctrl["window"].text().strip(),
+            "fps_limiter": self._gs_ctrl["fps"].text().strip(),
+            "fps_limiter_no_focus": self._gs_ctrl["fps_nofocus"].text().strip(),
+            "enable_force_grab_cursor": self._gs_ctrl["grab_cursor"].isChecked(),
+            "additional_options": self._gs_ctrl["additional"].text().strip(),
+        }
+
         self._game_manager.add_game(
             name=new_name,
             exe=new_exe,
@@ -191,6 +237,12 @@ class ConfigMixin:
             prefix_path=self._e_prefix.text().strip(),
             wrapper_command=self._e_wrap.text().strip(),
             exe_match_mode=self._game.get('exe_match_mode', 'auto'),
+            enable_gamemode=self._perf_ctrl["gamemode"].isChecked(),
+            enable_gamescope=self._perf_ctrl["gamescope"].isChecked(),
+            gamescope_settings=gs_settings,
+            fingerprint_lock=self._sec_ctrl["fingerprint"].isChecked(),
+            pre_launch_script=self._scripts_ctrl["pre_script"].text().strip(),
+            post_launch_script=self._scripts_ctrl["post_script"].text().strip(),
         )
 
         old_name = self._game.get('name', '')

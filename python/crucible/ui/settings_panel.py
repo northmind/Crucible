@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -12,13 +12,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from crucible.core.global_config import GlobalConfig
 from crucible.ui.panel_helpers import TabBar
+from crucible.ui.settings_general import GeneralControls, build_general_page
 from crucible.ui.settings_theme_actions import SettingsThemeMixin
 from crucible.ui.styles import line_accent, panel_fill
 from crucible.ui import styles
 from crucible.ui.theme_button import _ThemeBtn
 from crucible.ui.tokens import FONT_BASE, FONT_MONO, FONT_XS, PANEL_WIDTH, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL
-from crucible.ui.widgets import init_styled, make_divider, make_flat_button, make_scroll_page
+from crucible.ui.widgets import get_executable_path, init_styled, make_divider, make_flat_button, make_scroll_page
 from crucible.ui.theme_system import (
     SavedImportedTheme,
     migrate_legacy_remote_theme,
@@ -31,9 +33,24 @@ KOFI_URL = "https://ko-fi.com/nakama76442"
 class SettingsPanel(SettingsThemeMixin, QWidget):
     accent_changed = pyqtSignal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        global_config: GlobalConfig | None = None,
+        proton_manager: object | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         init_styled(self, "SettingsPanel")
+
+        self._global_config = global_config
+        self._proton_manager = proton_manager
+        self._gen_ctrl: GeneralControls | None = None
+        self._gen_loading = False
+
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(600)
+        self._save_timer.timeout.connect(self._save_general)
 
         self._selected_theme = None
         self._selected_saved_slug = ""
@@ -119,18 +136,90 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
         return scroll
 
     def _build_general_page(self) -> QWidget:
-        scroll = make_scroll_page(
-            margins=(SPACE_XL, 20, SPACE_XL, 20),
-            spacing=SPACE_MD,
-        )
-        layout = scroll.widget().layout()
+        if not self._global_config or not self._proton_manager:
+            scroll = make_scroll_page(margins=(SPACE_XL, 20, SPACE_XL, 20), spacing=SPACE_MD)
+            lbl = QLabel("global config not available")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(styles.mono_label())
+            scroll.widget().layout().addWidget(lbl)
+            scroll.widget().layout().addStretch()
+            return scroll
 
-        placeholder = QLabel("more settings coming")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setStyleSheet(styles.mono_label())
-        layout.addWidget(placeholder)
-        layout.addStretch()
+        scroll, self._gen_ctrl = build_general_page(
+            global_config=self._global_config,
+            proton_manager=self._proton_manager,
+            parent=self,
+            on_browse=self._on_general_browse,
+        )
+        self._gen_loading = True
+        self._connect_general_saves()
+        self._gen_loading = False
         return scroll
+
+    def _on_general_browse(self, key: str, target: QLineEdit) -> None:
+        path = get_executable_path(self)
+        if path:
+            target.setText(path)
+
+    def _connect_general_saves(self) -> None:
+        if not self._gen_ctrl:
+            return
+
+        def queue():
+            if not self._gen_loading:
+                self._save_timer.start()
+
+        for edit in self._gen_ctrl.all_edits():
+            edit.textChanged.connect(queue)
+        for toggle in self._gen_ctrl.all_toggles():
+            toggle.toggled.connect(lambda _: queue())
+        if self._gen_ctrl.proton_group:
+            self._gen_ctrl.proton_group.buttonToggled.connect(lambda *_: queue())
+
+    def _save_general(self) -> None:
+        ctrl = self._gen_ctrl
+        if not ctrl or not self._global_config:
+            return
+
+        checked = ctrl.proton_group.checkedButton() if ctrl.proton_group else None
+        proton = checked.text() if checked else ""
+
+        env_dict: dict[str, str] = {}
+        if ctrl.env:
+            for pair in ctrl.env.text().strip().split():
+                if "=" in pair:
+                    k, _, v = pair.partition("=")
+                    if k:
+                        env_dict[k] = v
+
+        gs: dict[str, object] = {}
+        for attr, key in (
+            ("gs_game_w", "game_width"), ("gs_game_h", "game_height"),
+            ("gs_up_w", "upscale_width"), ("gs_up_h", "upscale_height"),
+            ("gs_method", "upscale_method"), ("gs_window", "window_type"),
+            ("gs_fps", "fps_limiter"), ("gs_fps_nofocus", "fps_limiter_no_focus"),
+            ("gs_additional", "additional_options"),
+        ):
+            edit = getattr(ctrl, attr, None)
+            if edit:
+                gs[key] = edit.text().strip()
+        if ctrl.gs_grab_cursor:
+            gs["enable_force_grab_cursor"] = ctrl.gs_grab_cursor.isChecked()
+
+        updates = {
+            "proton_version": proton,
+            "launch_args": ctrl.launch_args.text().strip() if ctrl.launch_args else "",
+            "custom_overrides": ctrl.dlls.text().strip() if ctrl.dlls else "",
+            "wrapper_command": ctrl.wrapper.text().strip() if ctrl.wrapper else "",
+            "env_vars": env_dict,
+            "pre_launch_script": ctrl.pre_script.text().strip() if ctrl.pre_script else "",
+            "post_launch_script": ctrl.post_script.text().strip() if ctrl.post_script else "",
+            "enable_gamemode": ctrl.gamemode.isChecked() if ctrl.gamemode else False,
+            "enable_gamescope": ctrl.gamescope.isChecked() if ctrl.gamescope else False,
+            "gamescope_settings": gs,
+            "fingerprint_lock": ctrl.fingerprint.isChecked() if ctrl.fingerprint else False,
+        }
+        self._global_config.set_many(updates)
 
     def _refresh_sep_styles(self) -> None:
         self._tab_sep.setStyleSheet(styles.divider())
