@@ -22,6 +22,7 @@ from crucible.ui import styles
 from crucible.ui.detail_widgets import _AdvRow, _ProtonRow
 from crucible.ui.styles import get_text_colors
 from crucible.ui.theme_system import get_selection_colors
+from crucible.ui.tokens import FONT_BASE, FONT_MONO, FONT_XS
 from crucible.ui.widgets import folder_icon
 
 
@@ -78,7 +79,7 @@ class _ConfigRow(QWidget):
             self._browse_btn.setFlat(True)
             self._browse_btn.setFixedSize(20, 20)
             self._browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._browse_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self._browse_btn.setAccessibleName("Browse")
             self._browse_btn.clicked.connect(self._browse)
             layout.addWidget(self._browse_btn)
         else:
@@ -153,29 +154,29 @@ class _ConfigRow(QWidget):
         text = get_text_colors()
         sel = get_selection_colors()
 
-        row_bg = sel['hover_bg'] if self._hovered else 'transparent'
+        row_bg = sel.hover_bg if self._hovered else 'transparent'
         self.setStyleSheet(
             f"QWidget#ConfigRow {{ background: {row_bg}; border: none; border-radius: 0px; }}"
         )
         self._label.setStyleSheet(
-            f"color: {text['text_dim']}; background: transparent;"
-            " font-family: 'Courier New', monospace; font-size: 7.8pt; letter-spacing: 0.18em; text-transform: uppercase;"
+            f"color: {text.text_dim}; background: transparent;"
+            f" font-family: {FONT_MONO}; font-size: {FONT_XS}pt; letter-spacing: 0.18em; text-transform: uppercase;"
         )
         self._display.setStyleSheet(
-            f"color: {text['text']}; background: transparent; border: none; padding: 0;"
-            " font-family: 'Courier New', monospace; font-size: 8.75pt;"
+            f"color: {text.text}; background: transparent; border: none; padding: 0;"
+            f" font-family: {FONT_MONO}; font-size: {FONT_BASE}pt;"
         )
         edit_bg = 'transparent'
         self._edit.setStyleSheet(
-            f"color: {text['text']}; background: {edit_bg}; border: none; padding: 2px 0; outline: none; selection-background-color: {sel['text_selection_bg']}; selection-color: {sel['selection_text']};"
-            " font-family: 'Courier New', monospace; font-size: 8.75pt;"
+            f"color: {text.text}; background: {edit_bg}; border: none; padding: 2px 0; outline: none; selection-background-color: {sel.text_selection_bg}; selection-color: {sel.selection_text};"
+            f" font-family: {FONT_MONO}; font-size: {FONT_BASE}pt;"
         )
         if self._browse_btn:
-            self._browse_btn.setIcon(folder_icon(text['text_dim']))
+            self._browse_btn.setIcon(folder_icon(text.text_dim))
             self._browse_btn.setIconSize(QSize(12, 12))
             self._browse_btn.setStyleSheet(
-                f"QPushButton {{ background: transparent; border: none; padding: 0; color: {text['text_dim']}; }}"
-                f"QPushButton:hover {{ color: {sel['nav_accent']}; background: transparent; }}"
+                f"QPushButton {{ background: transparent; border: none; padding: 0; color: {text.text_dim}; }}"
+                f"QPushButton:hover {{ color: {sel.nav_accent}; background: transparent; }}"
             )
 
 
@@ -268,7 +269,7 @@ def build_launch_section(*, parent: QWidget, proton_manager: object, game: GameD
     else:
         no_versions = QLabel("no proton installed")
         no_versions.setContentsMargins(8, 2, 8, 2)
-        no_versions.setStyleSheet(styles.dim_label())
+        no_versions.setStyleSheet(styles.mono_label())
         layout.addWidget(no_versions)
 
     return widget, proton_group

@@ -7,6 +7,7 @@ from PyQt6.QtGui import QColor, QEnterEvent, QFont, QPainter, QPaintEvent, QResi
 from PyQt6.QtWidgets import QAbstractButton, QPushButton, QWidget
 
 from crucible.ui.theme_system import Theme
+from crucible.ui.tokens import FONT_BASE, FONT_MONO
 
 
 class _ThemeBtn(QAbstractButton):
@@ -47,7 +48,7 @@ class _ThemeBtn(QAbstractButton):
         dim = self._theme.text_dim
         accent = self._theme.accent
         self._remove_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {dim}; border: none; font-family: 'Courier New', monospace; font-size: 9pt; }}"
+            f"QPushButton {{ background: transparent; color: {dim}; border: none; font-family: {FONT_MONO}; font-size: {FONT_BASE}pt; }}"
             f"QPushButton:hover {{ color: {accent}; }}"
         )
 

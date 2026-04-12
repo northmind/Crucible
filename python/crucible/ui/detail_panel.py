@@ -12,13 +12,17 @@ from crucible.ui.detail_panel_tools import ToolsMixin
 from crucible.ui.detail_widgets import _ConfirmBar, _ExtractionBar, _ZipImportBar
 from crucible.ui.panel_helpers import build_collapsible_section
 from crucible.ui.styles import get_accent, panel_fill
+from crucible.ui import styles
+from crucible.ui.widgets import init_styled, make_scroll_page
 
 from crucible.core.managers import GameManager
 from crucible.core.proton_manager import ProtonManager
 from crucible.core.types import GameDict
 
+from crucible.ui.tokens import PANEL_WIDTH, SPACE_SM, SPACE_MD, SPACE_XL
 
-PANEL_W = 288
+
+PANEL_W = PANEL_WIDTH
 
 
 class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWidget):
@@ -34,8 +38,7 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
 
     def __init__(self, artwork_manager: ArtworkManager, game_manager: GameManager, proton_manager: ProtonManager, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName('DetailPanel')
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        init_styled(self, 'DetailPanel')
 
         self._game = None
         self._running = False
@@ -73,7 +76,7 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
             'background:'
             ' linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.0) 34%),'
             ' linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.16) 100%),'
-            ' #1a1d23;'
+            f' {panel_fill()};'
         )
         art_layout = QVBoxLayout(self._art)
         art_layout.setContentsMargins(0, 0, 0, 0)
@@ -89,8 +92,8 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
         self._art_notice.setObjectName('DetailArtNotice')
         self._art_notice.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         notice_layout = QVBoxLayout(self._art_notice)
-        notice_layout.setContentsMargins(18, 16, 18, 16)
-        notice_layout.setSpacing(8)
+        notice_layout.setContentsMargins(18, SPACE_XL, 18, SPACE_XL)
+        notice_layout.setSpacing(SPACE_MD)
 
         self._art_notice_title = QLabel()
         notice_layout.addWidget(self._art_notice_title)
@@ -126,29 +129,10 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
             drop_target.installEventFilter(self)
 
     def _make_scroll_page(self) -> QScrollArea:
-        accent = get_accent()
-        scroll = QScrollArea()
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(
-            'QScrollArea { background: transparent; border: none; }'
-            f'QScrollBar:vertical {{ background: transparent; width: 2px; margin: 0; }}'
-            f'QScrollBar::handle:vertical {{ background: {accent}; min-height: 20px; border: none; }}'
-            'QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }'
-            'QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }'
-            f'QScrollBar:horizontal {{ background: transparent; height: 2px; margin: 0; }}'
-            f'QScrollBar::handle:horizontal {{ background: {accent}; min-width: 20px; border: none; }}'
-            'QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }'
-            'QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }'
+        return make_scroll_page(
+            margins=(0, SPACE_MD, 0, SPACE_XL),
+            accent=get_accent(),
         )
-        scroll.viewport().setAutoFillBackground(False)
-        inner = QWidget()
-        inner.setStyleSheet('background: transparent;')
-        layout = QVBoxLayout(inner)
-        layout.setContentsMargins(0, 10, 0, 16)
-        layout.setSpacing(0)
-        scroll.setWidget(inner)
-        return scroll
 
     def _clear_content(self) -> None:
         while self._content_layout.count():
@@ -172,7 +156,7 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
         return titles.get(name, name.title())
 
     def _add_section(self, name: str, widget: QWidget, *, expanded: bool) -> None:
-        self._content_layout.addSpacing(6)
+        self._content_layout.addSpacing(SPACE_SM)
         section, header = build_collapsible_section(
             self._section_title(name),
             widget,
@@ -238,22 +222,31 @@ class GameDetailPanel(ConfigMixin, ArtworkMixin, DragDropMixin, ToolsMixin, QWid
         self.setStyleSheet(f'background: {panel_fill()}; border: none;')
 
     def refresh_colors(self) -> None:
-        """Reapply theme styles to all panel elements and rebuild the view."""
+        """Reapply theme styles to all panel elements without rebuilding.
+
+        Paint-based widgets (``_StateRow``, ``_ActionRow``, ``_DangerRow``,
+        ``_SectionHeaderButton``) read colors live from ``get_*()`` in their
+        ``paintEvent`` and only need a ``.update()`` call.  Stylesheet-based
+        ``_ConfigRow`` widgets need an explicit ``_refresh_style()`` call.
+        """
         self._apply_style()
         self._confirm_bar.refresh_colors()
         self._zip_import_bar._apply_styles()
         self._extraction_bar._apply_styles()
         self._apply_art_notice_style()
         accent = get_accent()
-        self._scroll.setStyleSheet(
-            'QScrollArea { background: transparent; border: none; }'
-            f'QScrollBar:vertical {{ background: transparent; width: 2px; margin: 0; }}'
-            f'QScrollBar::handle:vertical {{ background: {accent}; min-height: 20px; border: none; }}'
-            'QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }'
-            'QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }'
-            f'QScrollBar:horizontal {{ background: transparent; height: 2px; margin: 0; }}'
-            f'QScrollBar::handle:horizontal {{ background: {accent}; min-width: 20px; border: none; }}'
-            'QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }'
-            'QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }'
-        )
-        self._rebuild_view()
+        self._scroll.setStyleSheet(styles.scroll_area(accent=accent))
+        self._refresh_content_styles()
+
+    def _refresh_content_styles(self) -> None:
+        """Walk the content tree and refresh all themed child widgets in-place."""
+        from crucible.ui.detail_forms import _ConfigRow
+        from PyQt6.QtWidgets import QAbstractButton
+
+        scroll_widget = self._scroll.widget()
+        if scroll_widget is None:
+            return
+        for child in scroll_widget.findChildren(QAbstractButton):
+            child.update()
+        for child in scroll_widget.findChildren(_ConfigRow):
+            child._refresh_style()

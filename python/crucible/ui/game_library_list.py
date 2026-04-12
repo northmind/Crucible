@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import atexit
 
-from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, pyqtSignal
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QFrame, QStackedWidget,
+    QGraphicsOpacityEffect,
 )
 
 from crucible.core.managers import GameManager
@@ -20,11 +21,14 @@ from crucible.ui.game_item import (
     GameItemWidget,
 )
 from crucible.ui.styles import get_accent
+from crucible.ui import styles
+from crucible.ui.theme_system import animations_enabled
+from crucible.ui.tokens import ANIM_EASING, ANIM_FADE_MS, ANIM_STAGGER_MS, SPACE_MD
 
 _POLL_RUNNING_INTERVAL_MS = 2000
 _SELECT_DEBOUNCE_MS = 250
-_SIZE_DEFER_MS = 3000        # delay before size computation to let install_dir resolve
-_REFRESH_DEBOUNCE_MS = 200   # coalesce rapid-fire refresh signals
+_SIZE_DEFER_MS = 3000
+_REFRESH_DEBOUNCE_MS = 200
 
 
 class GameLibraryListWidget(QWidget):
@@ -52,11 +56,7 @@ class GameLibraryListWidget(QWidget):
         self._size_immediate: set[str] = set()
         from concurrent.futures import ThreadPoolExecutor
         self._size_executor = ThreadPoolExecutor(max_workers=_SIZE_WORKERS, thread_name_prefix="game-size")
-        # Belt-and-suspenders shutdown: atexit fires if the process exits
-        # without a Qt close event (e.g. SIGTERM, sys.exit from a background
-        # thread), while closeEvent handles the normal window-close path.
-        # Both are idempotent — calling shutdown() on an already-shut-down
-        # executor is a harmless no-op.
+        # atexit as fallback if no Qt close event (SIGTERM, sys.exit); idempotent.
         atexit.register(self._size_executor.shutdown, wait=False, cancel_futures=True)
 
         self._size_defer_timer = QTimer(self)
@@ -84,7 +84,7 @@ class GameLibraryListWidget(QWidget):
         layout.setSpacing(0)
 
         self._top_gap = QLabel()
-        self._top_gap.setFixedHeight(8)
+        self._top_gap.setFixedHeight(SPACE_MD)
         layout.addWidget(self._top_gap)
 
         self.list_widget = QListWidget()
@@ -95,25 +95,11 @@ class GameLibraryListWidget(QWidget):
             scrollbar.setSingleStep(10)
         self.list_widget.setFrameShape(QFrame.Shape.NoFrame)
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.list_widget.setStyleSheet(
-            "QListWidget { background-color: transparent; border: none; outline: none; }"
-            " QListWidget::item { background-color: transparent; border: none; padding: 0; }"
-            " QListWidget::item:selected, QListWidget::item:hover { background-color: transparent; }"
-            " QScrollBar:vertical { background: transparent; width: 2px; margin: 0; }"
-            " QScrollBar::handle:vertical { background: palette(link); min-height: 20px; border: none; }"
-            " QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-            " QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
-            " QScrollBar:horizontal { background: transparent; height: 2px; margin: 0; }"
-            " QScrollBar::handle:horizontal { background: palette(link); min-width: 20px; border: none; }"
-            " QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
-            " QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: transparent; }"
-        )
+        self.list_widget.setStyleSheet(styles.list_scroll_area())
 
         self.empty_widget = QWidget()
         empty_layout = QVBoxLayout(self.empty_widget)
         empty_layout.setContentsMargins(0, 0, 0, 0)
-        empty_layout.setSpacing(0)
-
         self._empty_surface = _EmptyLibrarySurface(self.accent_color, self.empty_widget)
         self._empty_surface.browse_requested.connect(self.browse_requested.emit)
         empty_layout.addWidget(self._empty_surface, 1)
@@ -124,12 +110,10 @@ class GameLibraryListWidget(QWidget):
         layout.addWidget(self.stack, 1)
 
     def set_accent(self, color: str) -> None:
-        """Update the accent color and refresh the game list."""
         self.accent_color = color
         self.refresh()
 
     def refresh(self) -> None:
-        """Rebuild the game list from the game manager, preserving selection and sizes."""
         accent = self.accent_color
         self._top_gap.setStyleSheet('background: transparent; border: none;')
         self._empty_surface.set_accent(accent)
@@ -174,6 +158,7 @@ class GameLibraryListWidget(QWidget):
 
         self.stack.setCurrentIndex(1 if len(games) == 0 else 0)
         self.filter_games(self._filter)
+        self._animate_fade_in()
 
     def _on_item_selected(self, game: GameDict) -> None:
         if self._select_guard:
@@ -200,7 +185,6 @@ class GameLibraryListWidget(QWidget):
                 w.set_selected(w.game_data['name'] == name)
 
     def invalidate_size(self, game_name: str) -> None:
-        """Clear cached size for *game_name* and mark it for immediate recomputation."""
         self._size_cache.pop(game_name, None)
         self._size_pending.discard(game_name)
         self._size_deferred.pop(game_name, None)
@@ -215,6 +199,27 @@ class GameLibraryListWidget(QWidget):
                 continue
             self._submit_size_computation(game_name, install_dir)
 
+    def _animate_fade_in(self) -> None:
+        """Stagger a fade-in opacity animation across all visible list items."""
+        if not animations_enabled():
+            return
+        self._fade_anims: list[QPropertyAnimation] = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            widget = self.list_widget.itemWidget(item)
+            if widget is None or item.isHidden():
+                continue
+            effect = QGraphicsOpacityEffect(widget)
+            effect.setOpacity(0.0)
+            widget.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity", widget)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setDuration(ANIM_FADE_MS)
+            anim.setEasingCurve(ANIM_EASING)
+            self._fade_anims.append(anim)
+            QTimer.singleShot(i * ANIM_STAGGER_MS, anim.start)
+
     def _submit_size_computation(self, game_name: str, install_dir: str) -> None:
         """Submit a single size computation to the background thread pool."""
         self._size_pending.add(game_name)
@@ -227,15 +232,12 @@ class GameLibraryListWidget(QWidget):
         )
 
     def schedule_refresh(self) -> None:
-        """Request a debounced refresh so rapid-fire signals coalesce into one rebuild."""
         self._refresh_timer.start()
 
     def clear_selection(self) -> None:
-        """Deselect all games in the list."""
         self._set_selected(None)
 
     def select_game(self, name: str | None) -> None:
-        """Programmatically select a game by name, or deselect if None."""
         self._set_selected(name)
 
     def filter_games(self, text: str) -> None:
@@ -291,10 +293,8 @@ class GameLibraryListWidget(QWidget):
             self.schedule_refresh()
 
     def prefetch_artwork_for_game(self, game_name: str, exe_path: str = '') -> None:
-        """Start a background artwork fetch for the given game."""
         self.artwork_manager.fetch_artwork(game_name, exe_path)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Shut down the background size-computation thread pool."""
         self._size_executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)

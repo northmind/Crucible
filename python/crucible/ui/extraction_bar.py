@@ -1,36 +1,34 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QPoint, QPropertyAnimation, QEasingCurve, QTimer
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from crucible.ui.styles import get_accent, get_bg, get_text_colors
+from crucible.ui.styles import get_accent, get_bg
+from crucible.ui import styles
+from crucible.ui.tokens import ICON_BTN_SIZE, SPACE_XS, SPACE_MD, SPACE_LG
+from crucible.ui.widgets import SlidingOverlay, init_styled, make_flat_button
 
 
-class _ExtractionBar(QWidget):
-    _SLIDE_MS = 200
+class _ExtractionBar(SlidingOverlay):
     _LINGER_MS = 4000
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
-        self.setObjectName("ExtractionBar")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._anim = QPropertyAnimation(self, b"pos")
-        self._anim.setDuration(self._SLIDE_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        init_styled(self, "ExtractionBar")
+        self._init_slide(200)
         self._linger = QTimer(self)
         self._linger.setSingleShot(True)
         self._linger.setInterval(self._LINGER_MS)
         self._linger.timeout.connect(self._dismiss)
         self._build_ui()
-        self.hide()
 
     def _build_ui(self) -> None:
         vl = QVBoxLayout(self)
-        vl.setContentsMargins(12, 10, 10, 10)
-        vl.setSpacing(4)
+        vl.setContentsMargins(SPACE_LG, SPACE_MD, SPACE_MD, SPACE_MD)
+        vl.setSpacing(SPACE_XS)
 
         top = QHBoxLayout()
-        top.setSpacing(8)
+        top.setSpacing(SPACE_MD)
         top.setContentsMargins(0, 0, 0, 0)
 
         self._check = QLabel("\u2713")
@@ -39,10 +37,7 @@ class _ExtractionBar(QWidget):
         self._msg = QLabel()
         top.addWidget(self._msg, 1)
 
-        self._close = QPushButton("\u00d7")
-        self._close.setFlat(True)
-        self._close.setFixedSize(18, 18)
-        self._close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close = make_flat_button("\u00d7", size=(ICON_BTN_SIZE, ICON_BTN_SIZE))
         self._close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._close.clicked.connect(self._dismiss)
         top.addWidget(self._close)
@@ -63,34 +58,21 @@ class _ExtractionBar(QWidget):
     def _apply_styles(self) -> None:
         a = get_accent()
         bg = get_bg()
-        dim = get_text_colors()['text_dim']
-        text_color = get_text_colors()['text']
         self.setStyleSheet(
-            f"#ExtractionBar {{ background-color: {bg['bg']}; border-top: 2px solid {a}; }}"
+            f"#ExtractionBar {{ background-color: {bg.bg}; border-top: 2px solid {a}; }}"
         )
         self._check.setStyleSheet(
-            f"color: {a}; font-family: 'Courier New', monospace; font-size: 11pt; font-weight: bold; background: transparent;"
+            styles.mono_label(dim=False, size="11pt", bold=True, extra=f"color: {a};")
         )
-        self._msg.setStyleSheet(
-            f"color: {text_color}; font-family: 'Courier New', monospace; font-size: 9pt; background: transparent;"
-        )
-        self._close.setStyleSheet(
-            f"QPushButton {{ color: {dim}; background: transparent; border: none; font-family: 'Courier New', monospace; font-size: 11pt; padding: 0; }}"
-            f"QPushButton:hover {{ color: {a}; }}"
-        )
-        sub = (
-            f"color: {dim}; font-family: 'Courier New', monospace;"
-            f" font-size: 8pt; background: transparent;"
-        )
+        self._msg.setStyleSheet(styles.mono_label(dim=False))
+        self._close.setStyleSheet(styles.flat_button(size="11pt", padding="0"))
+        sub = styles.mono_label(size="8pt")
         self._dll_lbl.setStyleSheet(sub)
         self._exe_lbl.setStyleSheet(sub)
 
     def show_result(self, detected_dlls: list[str] | None = None, detected_exe: str | None = None) -> None:
         self._linger.stop()
-        try:
-            self._anim.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        self._prep_anim()
 
         if detected_dlls and detected_exe:
             msg = "extracted \u2014 overrides set, exe found"
@@ -119,36 +101,10 @@ class _ExtractionBar(QWidget):
         else:
             self._exe_lbl.hide()
 
-        p_w, p_h = self.parent().width(), self.parent().height()
-        self.setFixedWidth(p_w - 1)
         self.adjustSize()
-        h = self.height()
-        end_y = p_h - h
-        start_y = p_h
-
-        if not self.isVisible():
-            self.move(1, start_y)
-            self.show()
-            self.raise_()
-
-        self._anim.setStartValue(self.pos())
-        self._anim.setEndValue(QPoint(1, end_y))
-        self._anim.start()
+        self._slide_up()
         self._linger.start()
 
     def _dismiss(self) -> None:
         self._linger.stop()
-        try:
-            self._anim.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
-        p_h = self.parent().height()
-        self._anim.setStartValue(self.pos())
-        self._anim.setEndValue(QPoint(1, p_h))
-        self._anim.finished.connect(self.hide)
-        self._anim.start()
-
-    def reposition(self, parent_w: int, parent_h: int) -> None:
-        self.setFixedWidth(parent_w - 1)
-        if self.isVisible():
-            self.move(1, parent_h - self.height())
+        self._slide_down()

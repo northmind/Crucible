@@ -22,9 +22,9 @@ class _StateRow(QAbstractButton):
         p = QPainter(self)
         checked = self.isChecked()
         sel = get_selection_colors()
-        accent = QColor(sel['nav_accent'])
-        selection_bg = QColor(sel['selection_bg'])
-        hover_bg = QColor(sel['hover_bg'])
+        accent = QColor(sel.nav_accent)
+        selection_bg = QColor(sel.selection_bg)
+        hover_bg = QColor(sel.hover_bg)
 
         if checked:
             p.fillRect(self.rect(), selection_bg)
@@ -38,8 +38,8 @@ class _StateRow(QAbstractButton):
         baseline = (self.height() + fm.ascent() - fm.descent()) // 2
 
         tc = get_text_colors()
-        main_color = QColor(sel['selection_text']) if checked else QColor(tc['text_dim'])
-        meta_color = accent if checked else QColor(tc['text_dim'])
+        main_color = QColor(sel.selection_text) if checked else QColor(tc.text)
+        meta_color = accent if checked else QColor(tc.text_dim)
         left = 18 if checked else 16
         p.setPen(main_color)
         p.drawText(left, baseline, self._label)
@@ -78,17 +78,17 @@ class _ActionRow(QAbstractButton):
         p = QPainter(self)
         sel = get_selection_colors()
         tc = get_text_colors()
-        accent = QColor(sel['nav_accent'])
-        dim = QColor(tc['text_dim'])
+        accent = QColor(sel.nav_accent)
+        normal = QColor(tc.text)
         if self._hovered:
-            p.fillRect(self.rect(), QColor(sel['hover_bg']))
+            p.fillRect(self.rect(), QColor(sel.hover_bg))
         font = QFont("Courier New", 8)
         p.setFont(font)
         fm = p.fontMetrics()
         baseline = (self.height() + fm.ascent() - fm.descent()) // 2
-        p.setPen(QColor(sel['selection_text']) if self._hovered else dim)
+        p.setPen(QColor(sel.selection_text) if self._hovered else normal)
         p.drawText(16, baseline, self._label)
-        p.setPen(accent if self._hovered else dim)
+        p.setPen(accent if self._hovered else QColor(tc.text_dim))
         p.drawText(self.width() - fm.horizontalAdvance("\u203a") - 10, baseline, "\u203a")
         p.end()
 
@@ -117,14 +117,15 @@ class _DangerRow(QAbstractButton):
     def paintEvent(self, _: QPaintEvent | None) -> None:
         p = QPainter(self)
         sel = get_selection_colors()
-        dim = QColor(get_text_colors()['text_dim'])
+        tc = get_text_colors()
+        normal = QColor(tc.text)
         if self._hovered:
-            p.fillRect(self.rect(), QColor(sel['hover_bg']))
+            p.fillRect(self.rect(), QColor(sel.hover_bg))
         font = QFont("Courier New", 8)
         p.setFont(font)
         fm = p.fontMetrics()
         baseline = (self.height() + fm.ascent() - fm.descent()) // 2
-        p.setPen(QColor(sel['selection_text']) if self._hovered else dim)
+        p.setPen(QColor(sel.selection_text) if self._hovered else normal)
         p.drawText(10, baseline, self._name)
         if self._hovered:
             p.drawText(self.width() - 76, baseline, 'destructive')

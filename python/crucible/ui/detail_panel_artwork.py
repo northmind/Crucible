@@ -5,6 +5,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QWidget
 
 from crucible.ui.styles import get_text_colors, line_accent_rgba, shell_fill
+from crucible.ui import styles
 from crucible.ui.theme_system import get_selection_colors
 
 
@@ -73,20 +74,14 @@ class ArtworkMixin:
         self._apply_art_notice_style()
 
     def _apply_art_notice_style(self) -> None:
-        accent = get_selection_colors()['nav_accent']
-        dim = get_text_colors()['text_dim']
-        text = get_text_colors()['text']
+        accent = get_selection_colors().nav_accent
         tint = line_accent_rgba(132)
         fill = shell_fill()
         self._art_notice.setStyleSheet(
             f"#DetailArtNotice {{ background: {fill}; border-left: 2px solid {accent}; border-bottom: 1px solid {tint}; }}"
         )
-        self._art_notice_title.setStyleSheet(
-            f"color: {text}; background: transparent; font-family: 'Courier New', monospace; font-size: 9pt; font-weight: bold;"
-        )
-        self._art_notice_message.setStyleSheet(
-            f"color: {dim}; background: transparent; font-family: 'Courier New', monospace; font-size: 9pt;"
-        )
+        self._art_notice_title.setStyleSheet(styles.mono_label(dim=False, bold=True))
+        self._art_notice_message.setStyleSheet(styles.mono_label())
 
     def show_launch_error(self, title: str, message: str) -> None:
         """Show a titled error message in the art notice overlay."""

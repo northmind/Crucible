@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from crucible.ui.theme_button import _ThemeBtn
-from crucible.ui.theme_importer import import_vscode_theme_snapshot, normalize_vscode_theme_slug
+from crucible.ui.theme_importer import (
+    ThemeImportWorker,
+    import_vscode_theme_snapshot,
+    normalize_vscode_theme_slug,
+)
 from crucible.ui.theme_system import (
     Theme,
     apply_builtin_theme,
@@ -72,20 +76,49 @@ class SettingsThemeMixin:
             self._status_lbl.hide()
             return
         try:
-            slug = normalize_vscode_theme_slug(raw)
-            remote = import_vscode_theme_snapshot(slug)
-            theme = theme_from_import_palette(remote.palette, remote.slug)
-        except (OSError, ValueError, KeyError) as exc:
+            normalize_vscode_theme_slug(raw)
+        except ValueError as exc:
             self._status_lbl.setText(f"could not import theme: {exc}")
             self._status_lbl.show()
             return
 
-        saved = save_imported_theme(theme, slug, remote.author)
+        # Prevent duplicate concurrent imports
+        if hasattr(self, "_import_worker") and self._import_worker is not None:
+            if self._import_worker.isRunning():
+                return
+
+        self._import_btn.setEnabled(False)
+        self._import_input.setEnabled(False)
+        self._status_lbl.setText("importing\u2026")
+        self._status_lbl.show()
+
+        self._import_worker = ThemeImportWorker(raw, parent=self)
+        self._import_worker.succeeded.connect(self._on_import_succeeded)
+        self._import_worker.failed.connect(self._on_import_failed)
+        self._import_worker.finished.connect(self._on_import_finished)
+        self._import_worker.start()
+
+    def _on_import_succeeded(self, snapshot: object) -> None:
+        """Handle a successfully fetched theme snapshot."""
+        slug = snapshot.slug
+        theme = theme_from_import_palette(snapshot.palette, slug)
+        saved = save_imported_theme(theme, slug, snapshot.author)
         active_theme = apply_saved_imported_theme(saved.slug)
         self._sync_from_settings()
         self._import_input.clear()
         self._status_lbl.hide()
         self.accent_changed.emit(active_theme.accent)
+
+    def _on_import_failed(self, message: str) -> None:
+        """Handle a theme import failure."""
+        self._status_lbl.setText(f"could not import theme: {message}")
+        self._status_lbl.show()
+
+    def _on_import_finished(self) -> None:
+        """Re-enable UI controls after the import worker completes."""
+        self._import_btn.setEnabled(True)
+        self._import_input.setEnabled(True)
+        self._import_worker = None
 
     def _select_local_theme(self, theme: Theme) -> None:
         self._selected_theme = theme

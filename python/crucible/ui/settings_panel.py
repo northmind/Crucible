@@ -14,15 +14,17 @@ from PyQt6.QtWidgets import (
 
 from crucible.ui.panel_helpers import TabBar
 from crucible.ui.settings_theme_actions import SettingsThemeMixin
-from crucible.ui.styles import get_text_colors, line_accent, panel_fill
+from crucible.ui.styles import line_accent, panel_fill
+from crucible.ui import styles
 from crucible.ui.theme_button import _ThemeBtn
+from crucible.ui.tokens import FONT_BASE, FONT_MONO, FONT_XS, PANEL_WIDTH, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL
+from crucible.ui.widgets import init_styled, make_divider, make_flat_button, make_scroll_page
 from crucible.ui.theme_system import (
     SavedImportedTheme,
-    get_selection_colors,
     migrate_legacy_remote_theme,
 )
 
-PANEL_W = 288
+PANEL_W = PANEL_WIDTH
 KOFI_URL = "https://ko-fi.com/nakama76442"
 
 
@@ -31,8 +33,7 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("SettingsPanel")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        init_styled(self, "SettingsPanel")
 
         self._selected_theme = None
         self._selected_saved_slug = ""
@@ -70,26 +71,19 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
         self._refresh_sep_styles()
 
     def _build_themes_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(scroll.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: transparent; border: none;")
-
-        inner = QWidget()
-        inner.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(inner)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(0)
+        scroll = make_scroll_page(
+            margins=(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD),
+        )
+        layout = scroll.widget().layout()
 
         self._import_hdr = self._link_header("import from vscodethemes", "https://vscodethemes.com/")
         layout.addWidget(self._import_hdr)
-        layout.addWidget(self._divider())
-        layout.addSpacing(8)
+        layout.addWidget(make_divider())
+        layout.addSpacing(SPACE_MD)
 
         import_row = QHBoxLayout()
         import_row.setContentsMargins(0, 0, 0, 0)
-        import_row.setSpacing(6)
+        import_row.setSpacing(SPACE_SM)
         self._import_input = QLineEdit()
         self._import_input.setPlaceholderText("paste theme url here")
         self._import_input.returnPressed.connect(self._import_theme_from_input)
@@ -101,61 +95,49 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
         self._style_nav_btn(self._import_btn, width=52, text_size=8)
         import_row.addWidget(self._import_btn)
         layout.addLayout(import_row)
-        layout.addSpacing(8)
+        layout.addSpacing(SPACE_MD)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setWordWrap(True)
         self._status_lbl.hide()
         layout.addWidget(self._status_lbl)
-        layout.addSpacing(12)
+        layout.addSpacing(SPACE_LG)
 
         self._saved_hdr = self._section_header("saved themes")
         layout.addWidget(self._saved_hdr)
-        layout.addWidget(self._divider())
-        layout.addSpacing(8)
+        layout.addWidget(make_divider())
+        layout.addSpacing(SPACE_MD)
 
         self._saved_container = QWidget()
         self._saved_container.setStyleSheet("background: transparent;")
         self._saved_layout = QVBoxLayout(self._saved_container)
         self._saved_layout.setContentsMargins(0, 0, 0, 0)
-        self._saved_layout.setSpacing(10)
+        self._saved_layout.setSpacing(SPACE_MD)
         layout.addWidget(self._saved_container)
 
         layout.addStretch()
-        scroll.setWidget(inner)
         return scroll
 
     def _build_general_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(scroll.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: transparent; border: none;")
-
-        page = QWidget()
-        page.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(8)
+        scroll = make_scroll_page(
+            margins=(SPACE_XL, 20, SPACE_XL, 20),
+            spacing=SPACE_MD,
+        )
+        layout = scroll.widget().layout()
 
         placeholder = QLabel("more settings coming")
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setStyleSheet(
-            f"color: {get_text_colors()['text_dim']}; font-family: 'Courier New', monospace; font-size: 9pt;"
-        )
+        placeholder.setStyleSheet(styles.mono_label())
         layout.addWidget(placeholder)
         layout.addStretch()
-        scroll.setWidget(page)
         return scroll
 
     def _refresh_sep_styles(self) -> None:
-        self._tab_sep.setStyleSheet(f"background: {line_accent()};")
+        self._tab_sep.setStyleSheet(styles.divider())
 
     def _section_header(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"color: {line_accent()}; font-family: 'Courier New', monospace; font-size: 9pt; background: transparent;"
-        )
+        lbl.setStyleSheet(styles.section_header())
         return lbl
 
     def _link_header(self, text: str, url: str) -> QLabel:
@@ -164,31 +146,18 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
         lbl.setTextFormat(Qt.TextFormat.RichText)
         lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         lbl.setStyleSheet(
-            f"QLabel {{ color: {line_accent()}; font-family: 'Courier New', monospace; font-size: 9pt; background: transparent; }} QLabel a {{ color: {line_accent()}; text-decoration: none; }}"
+            f"QLabel {{ color: {line_accent()}; font-family: {FONT_MONO}; font-size: {FONT_BASE}pt; background: transparent; }} QLabel a {{ color: {line_accent()}; text-decoration: none; }}"
         )
         return lbl
-
-    def _divider(self) -> QLabel:
-        sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background: {line_accent()};")
-        return sep
 
     def _style_nav_btn(self, btn: QPushButton, width: int = 18, text_size: int = 10) -> None:
         btn.setFixedSize(width, 18 if width == 18 else 22)
         btn.setFlat(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            f"QPushButton {{ color: {get_text_colors()['text_dim']}; background: transparent; border: none; font-family: 'Courier New', monospace; font-size: {text_size}pt; }}"
-            f"QPushButton:hover {{ color: {line_accent()}; }}"
-        )
+        btn.setStyleSheet(styles.flat_button(size=f"{text_size}pt"))
 
     def _style_input(self, widget: QLineEdit) -> None:
-        colors = get_text_colors()
-        widget.setStyleSheet(
-            f"QLineEdit {{ background: transparent; color: {colors['text']}; border: none; font-family: 'Courier New', monospace; font-size: 8.5pt; padding: 2px 0px; selection-background-color: {get_selection_colors()['text_selection_bg']}; selection-color: {get_selection_colors()['selection_text']}; }}"
-            f"QLineEdit::placeholder {{ color: {colors['text_dim']}; }}"
-        )
+        widget.setStyleSheet(styles.text_input(size=f"{FONT_XS}pt"))
         widget.setCursorPosition(0)
 
     def _on_tab_switched(self, idx: int) -> None:
@@ -203,17 +172,13 @@ class SettingsPanel(SettingsThemeMixin, QWidget):
             btn.update()
         for btn in self._saved_btns.values():
             btn.update()
-        colors = get_text_colors()
-        self._status_lbl.setStyleSheet(
-            f"color: {colors['text_dim']}; font-family: 'Courier New', monospace; font-size: 8pt;"
-        )
-        self._style_nav_btn(self._import_btn, width=52, text_size=8)
+        self._status_lbl.setStyleSheet(styles.mono_label(size=f"{FONT_XS}pt"))
+        self._style_nav_btn(self._import_btn, width=52, text_size=FONT_XS)
         self._style_input(self._import_input)
         if hasattr(self, '_saved_hdr'):
-            self._saved_hdr.setStyleSheet(
-                f"color: {line_accent()}; font-family: 'Courier New', monospace; font-size: 9pt; background: transparent;"
-            )
+            self._saved_hdr.setStyleSheet(styles.section_header())
         if hasattr(self, '_import_hdr'):
+            a = line_accent()
             self._import_hdr.setStyleSheet(
-                f"QLabel {{ color: {line_accent()}; font-family: 'Courier New', monospace; font-size: 9pt; background: transparent; }} QLabel a {{ color: {line_accent()}; text-decoration: none; }}"
+                f"QLabel {{ color: {a}; font-family: {FONT_MONO}; font-size: {FONT_BASE}pt; background: transparent; }} QLabel a {{ color: {a}; text-decoration: none; }}"
             )

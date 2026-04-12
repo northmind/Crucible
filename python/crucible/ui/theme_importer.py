@@ -2,10 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import re
 import urllib.parse
 import urllib.request
 
+from PyQt6.QtCore import QThread, pyqtSignal
+
+from crucible.ui.color_utils import (
+    color_distance,
+    contrast_text,
+    mix_hex,
+    shift_lightness,
+)
+
+_log = logging.getLogger(__name__)
 _USER_AGENT = "Mozilla/5.0"
 _BASE_URL = "https://vscodethemes.com"
 _THEME_RE = re.compile(r'"theme":(?P<theme>\{.*?\})\}\]\},"searchQuery":', re.S)
@@ -92,35 +103,43 @@ def import_vscode_theme_snapshot(value: str) -> ImportedThemeSnapshot:
     text = _pick_color(
         colors,
         "editor.foreground",
+        "editorForeground",
+        "foreground",
         "tab.activeForeground",
         "titleBar.activeForeground",
-        "editorForeground",
         "tabActiveForeground",
         "titleBarActiveForeground",
-        fallback=_contrast_text(bg),
+        fallback=contrast_text(bg),
     )
     text_dim = _pick_color(
         colors,
         "descriptionForeground",
-        "activityBar.inactiveForeground",
+        "sideBar.foreground",
+        "sideBarForeground",
         "tab.inactiveForeground",
         "titleBar.inactiveForeground",
-        "activityBarInactiveForeground",
         "tabInactiveForeground",
         "titleBarInactiveForeground",
-        fallback=_mix_hex(text, bg, 0.42),
+        fallback=mix_hex(text, bg, 0.28),
     )
-    accent = _pick_color(
+    accent = _pick_accent_color(
         colors,
+        "activityBarBadge.background",
+        "badge.background",
+        "button.background",
+        "focusBorder",
+        "progressBar.background",
+        "textLink.foreground",
+        "list.highlightForeground",
+        "activityBar.activeBorder",
         "activityBar.foreground",
         "tab.activeForeground",
-        "activityBarForeground",
-        "tabActiveForeground",
-        "activityBarBadge.background",
-        "button.background",
         "activityBarBadgeBackground",
         "buttonBackground",
+        "activityBarForeground",
+        "tabActiveForeground",
         fallback=text,
+        bg=bg,
     )
     accent_soft_raw = _pick_color(
         colors,
@@ -130,7 +149,7 @@ def import_vscode_theme_snapshot(value: str) -> ImportedThemeSnapshot:
         "activityBarActiveBackground",
         "tabActiveBackground",
         "listActiveSelectionBackground",
-        fallback=_mix_hex(bg, accent, 0.18),
+        fallback=mix_hex(bg, accent, 0.18),
     )
     accent_soft = _derive_soft_fill(accent_soft_raw, accent, bg)
     border = _pick_border_color(colors, bg, text, text_dim)
@@ -193,7 +212,7 @@ def _pick_border_color(colors: dict[str, str], bg: str, text: str, text_dim: str
     for key in quiet_keys:
         value = colors.get(key)
         if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value):
-            if _color_distance(value, bg) >= 20 and _color_distance(value, text) >= 28:
+            if color_distance(value, bg) >= 20 and color_distance(value, text) >= 28:
                 return value
     return _derive_neutral_border(bg, text_dim)
 
@@ -206,17 +225,39 @@ def _pick_color(colors: dict[str, str], *keys: str, fallback: str) -> str:
     return fallback
 
 
+def _is_viable_accent(color: str, bg: str) -> bool:
+    """Return True if *color* is chromatic enough and distinct enough from *bg* to serve as accent."""
+    r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    # Channel spread: grays/whites/blacks have near-zero spread
+    spread = max(r, g, b) - min(r, g, b)
+    if spread < 25:
+        return False
+    if color_distance(color, bg) < 40:
+        return False
+    return True
+
+
+def _pick_accent_color(colors: dict[str, str], *keys: str, fallback: str, bg: str) -> str:
+    """Pick the first viable accent color — must be chromatic and distinct from bg."""
+    for key in keys:
+        value = colors.get(key)
+        if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+            if _is_viable_accent(value, bg):
+                return value
+    return fallback
+
+
 def _derive_soft_fill(raw: str, accent: str, bg: str) -> str:
-    fill = raw if raw.lower() != bg.lower() else _mix_hex(bg, accent, 0.18)
-    if _color_distance(fill, bg) < 18:
-        fill = _mix_hex(bg, accent, 0.18)
+    fill = raw if raw.lower() != bg.lower() else mix_hex(bg, accent, 0.18)
+    if color_distance(fill, bg) < 18:
+        fill = mix_hex(bg, accent, 0.18)
     return fill
 
 
 def _derive_neutral_border(bg: str, text_dim: str) -> str:
-    border = _mix_hex(bg, text_dim, 0.18)
-    if _color_distance(border, bg) < 20:
-        border = _shift_lightness(bg, 22)
+    border = mix_hex(bg, text_dim, 0.18)
+    if color_distance(border, bg) < 20:
+        border = shift_lightness(bg, 22)
     return border
 
 
@@ -241,43 +282,30 @@ def _infer_author_from_slug(slug: str) -> str:
     return "Unknown Author"
 
 
-def _contrast_text(bg_hex: str) -> str:
-    r, g, b = _hex_to_rgb(bg_hex)
-    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-    return "#f3f1eb" if luminance < 0.55 else "#17191e"
+# ---------------------------------------------------------------------------
+# Async import worker (Phase 2f)
+# ---------------------------------------------------------------------------
 
 
-def _mix_hex(a_hex: str, b_hex: str, amount: float) -> str:
-    amount = max(0.0, min(1.0, amount))
-    ar, ag, ab = _hex_to_rgb(a_hex)
-    br, bg, bb = _hex_to_rgb(b_hex)
-    r = round(ar + (br - ar) * amount)
-    g = round(ag + (bg - ag) * amount)
-    b = round(ab + (bb - ab) * amount)
-    return f"#{r:02x}{g:02x}{b:02x}"
+class ThemeImportWorker(QThread):
+    """Background thread that fetches and parses a VS Code theme.
 
+    Signals:
+        succeeded(ImportedThemeSnapshot): emitted on successful import.
+        failed(str): emitted with an error message on failure.
+    """
 
-def _shift_lightness(value: str, amount: int) -> str:
-    r, g, b = _hex_to_rgb(value)
-    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-    delta = amount if luminance < 0.5 else -amount
-    r = max(0, min(255, r + delta))
-    g = max(0, min(255, g + delta))
-    b = max(0, min(255, b + delta))
-    return f"#{r:02x}{g:02x}{b:02x}"
+    succeeded = pyqtSignal(object)  # ImportedThemeSnapshot
+    failed = pyqtSignal(str)
 
+    def __init__(self, raw_url: str, parent: object | None = None) -> None:
+        super().__init__(parent)
+        self._raw_url = raw_url
 
-def _color_distance(a_hex: str, b_hex: str) -> int:
-    ar, ag, ab = _hex_to_rgb(a_hex)
-    br, bg, bb = _hex_to_rgb(b_hex)
-    return abs(ar - br) + abs(ag - bg) + abs(ab - bb)
-
-
-_HEX_COLOR_RE = re.compile(r'^#?[0-9a-fA-F]{6}$')
-
-
-def _hex_to_rgb(value: str) -> tuple[int, int, int]:
-    value = value.lstrip("#")
-    if not _HEX_COLOR_RE.match(value):
-        raise ValueError(f"Invalid hex color: #{value}")
-    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+    def run(self) -> None:
+        try:
+            snapshot = import_vscode_theme_snapshot(self._raw_url)
+            self.succeeded.emit(snapshot)
+        except (OSError, ValueError, KeyError) as exc:
+            _log.debug("Theme import failed for %r: %s", self._raw_url, exc)
+            self.failed.emit(str(exc))

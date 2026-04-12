@@ -1,12 +1,163 @@
 from pathlib import Path
 
-from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
-from PyQt6.QtWidgets import QFileDialog, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, Qt
+from PyQt6.QtGui import QFont, QIcon, QPainter, QPixmap
+from PyQt6.QtWidgets import (
+    QFileDialog, QDialog, QLabel, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
+)
 
 from crucible.ui import styles
-from crucible.ui.styles import get_text_colors
-from crucible.ui.theme_system import get_selection_colors
+from crucible.ui.tokens import ICON_BTN_SIZE, SPACE_MD, SPACE_LG
+
+
+# ---------------------------------------------------------------------------
+# Widget factory helpers
+# ---------------------------------------------------------------------------
+
+
+def init_styled(widget: QWidget, name: str) -> None:
+    """Set *name* as the Qt object name and enable stylesheet backgrounds."""
+    widget.setObjectName(name)
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+
+def make_scroll_page(
+    *,
+    margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+    spacing: int = 0,
+    accent: str | None = None,
+) -> QScrollArea:
+    """Create a frameless QScrollArea with a transparent inner QWidget and QVBoxLayout.
+
+    Access the inner layout via ``scroll.widget().layout()``.
+    """
+    scroll = QScrollArea()
+    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll.setStyleSheet(styles.scroll_area(accent=accent) if accent else
+                         "background: transparent; border: none;")
+    scroll.viewport().setAutoFillBackground(False)
+    inner = QWidget()
+    inner.setStyleSheet("background: transparent;")
+    layout = QVBoxLayout(inner)
+    layout.setContentsMargins(*margins)
+    layout.setSpacing(spacing)
+    scroll.setWidget(inner)
+    return scroll
+
+
+def make_divider() -> QLabel:
+    """Create a 1px-tall themed separator line."""
+    sep = QLabel()
+    sep.setFixedHeight(1)
+    sep.setStyleSheet(styles.divider())
+    return sep
+
+
+def make_flat_button(
+    text: str,
+    *,
+    size: tuple[int, int] | None = None,
+    qss: str = "",
+) -> QPushButton:
+    """Create a flat QPushButton with pointer cursor and optional fixed size.
+
+    The caller is responsible for connecting signals and applying final QSS
+    via ``setStyleSheet`` if *qss* is empty.
+    """
+    btn = QPushButton(text)
+    btn.setFlat(True)
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    if size is not None:
+        btn.setFixedSize(*size)
+    if qss:
+        btn.setStyleSheet(qss)
+    return btn
+
+# ---------------------------------------------------------------------------
+# Sliding overlay base
+# ---------------------------------------------------------------------------
+
+
+class SlidingOverlay(QWidget):
+    """Base class for bottom-anchored overlays that slide up/down.
+
+    Subclasses must call ``_init_slide(duration_ms)`` after ``super().__init__``
+    and implement ``_build_ui()`` / ``refresh_colors()``.  Override
+    ``_bar_height()`` for dynamic-height overlays (default: ``self.height()``).
+    """
+
+    _X_OFFSET = 1  # left pixel inset from parent edge
+
+    def _init_slide(self, duration_ms: int = 160) -> None:
+        self._anim = QPropertyAnimation(self, b"pos")
+        self._anim.setDuration(duration_ms)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.hide()
+
+    # -- helpers subclasses may override ------------------------------------
+
+    def _bar_height(self) -> int:
+        """Return the current bar height used for slide calculations."""
+        return self.height()
+
+    def _on_slide_width(self, width: int) -> None:
+        """Called when the bar width changes during slide/reposition.
+
+        Override to sync child widgets (e.g. progress bar) to the new width.
+        """
+
+    def _on_hidden(self) -> None:
+        """Called after the dismiss animation finishes and the widget hides.
+
+        Override to reset internal state (e.g. progress bars).
+        """
+        self.hide()
+
+    # -- slide mechanics ----------------------------------------------------
+
+    def _prep_anim(self) -> None:
+        """Stop the running animation and disconnect finished signal."""
+        self._anim.stop()
+        try:
+            self._anim.finished.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+
+    def _slide_up(self) -> None:
+        p_w, p_h = self.parent().width(), self.parent().height()
+        w = p_w - self._X_OFFSET
+        self.setFixedWidth(w)
+        self._on_slide_width(w)
+        self._prep_anim()
+        target = QPoint(self._X_OFFSET, p_h - self._bar_height())
+        if not self.isVisible():
+            self.move(self._X_OFFSET, p_h)
+            self.show()
+            self.raise_()
+        if self.pos() == target:
+            return
+        self._anim.setStartValue(self.pos())
+        self._anim.setEndValue(target)
+        self._anim.start()
+
+    def _slide_down(self) -> None:
+        p_h = self.parent().height()
+        self._prep_anim()
+        self._anim.setStartValue(self.pos())
+        self._anim.setEndValue(QPoint(self._X_OFFSET, p_h))
+        self._anim.finished.connect(self._on_hidden)
+        self._anim.start()
+
+    def reposition(self, parent_w: int, parent_h: int) -> None:
+        w = parent_w - self._X_OFFSET
+        self.setFixedWidth(w)
+        self._on_slide_width(w)
+        if self.isVisible():
+            self.move(self._X_OFFSET, parent_h - self._bar_height())
+
 
 _FOLDER_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"'
@@ -55,174 +206,3 @@ def get_directory_path(parent: QWidget | None = None, title: str = "Select Direc
     if dialog.exec() == QDialog.DialogCode.Accepted:
         return dialog.selectedFiles()[0]
     return None
-
-
-_NOTICE_KIND = {
-    "warning": {"color": "#e5c07b", "tint": "rgba(229, 192, 123, 0.12)", "symbol": "\u26a0"},
-    "error": {"color": "#e06c75", "tint": "rgba(224, 108, 117, 0.12)", "symbol": "\u2715"},
-    "info": {"color": None, "tint": None, "symbol": "\u2022"},
-}
-
-
-class SlidingNotification(QWidget):
-    _WIDTH = 400
-    _MARGIN = 16
-    _SLIDE_MS = 180
-    _LINGER_MS = 5000
-
-    def __init__(self, parent: QWidget | None = None, *, show_close: bool = True) -> None:
-        super().__init__(parent)
-        self.setObjectName("SlidingNotification")
-        self._show_close = show_close
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._anchor_y = self._MARGIN
-        self._anim = QPropertyAnimation(self, b"pos")
-        self._anim.setDuration(self._SLIDE_MS)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._linger = QTimer(self)
-        self._linger.setSingleShot(True)
-        self._linger.setInterval(self._LINGER_MS)
-        self._linger.timeout.connect(self.dismiss)
-        self._build_ui()
-        self.hide()
-
-    def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(8)
-
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(8)
-
-        self._symbol = QLabel()
-        header.addWidget(self._symbol)
-
-        self._title = QLabel()
-        header.addWidget(self._title, 1)
-
-        self._close = QPushButton("×")
-        self._close.setFlat(True)
-        self._close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._close.setFixedSize(18, 18)
-        self._close.clicked.connect(self.dismiss)
-        self._close.setVisible(self._show_close)
-        header.addWidget(self._close)
-
-        root.addLayout(header)
-
-        self._message = QLabel()
-        self._message.setWordWrap(True)
-        root.addWidget(self._message)
-
-        self.refresh_colors()
-
-    def refresh_colors(self) -> None:
-        """Reapply current theme colors to the notification widget."""
-        self._apply_kind("info")
-
-    def show_message(self, title: str, message: str, kind: str = "warning", *, anchor_y: int | None = None, linger_ms: int | None = None) -> None:
-        """Slide in a notification with the given title, message, and kind ('warning', 'error', or 'info')."""
-        if anchor_y is not None:
-            self._anchor_y = anchor_y
-        self._linger.stop()
-        try:
-            self._anim.finished.disconnect(self.hide)
-        except (RuntimeError, TypeError):
-            pass
-
-        self._apply_kind(kind)
-        self._title.setText(title.lower())
-        self._message.setText(message)
-
-        parent = self.parentWidget()
-        if parent is None:
-            return
-
-        available_width = max(240, min(self._WIDTH, parent.width() - self._MARGIN * 2))
-        self.setFixedWidth(available_width)
-        self.adjustSize()
-
-        end = self._visible_pos()
-        start = QPoint(parent.width() + self.width(), end.y())
-
-        self._anim.stop()
-        if not self.isVisible():
-            self.move(start)
-            self.show()
-            self.raise_()
-        self._anim.setStartValue(self.pos())
-        self._anim.setEndValue(end)
-        self._anim.start()
-
-        linger = self._LINGER_MS if linger_ms is None else linger_ms
-        if linger > 0:
-            self._linger.start(linger)
-
-    def dismiss(self) -> None:
-        """Animate the notification off-screen to the right and hide it."""
-        self._linger.stop()
-        if not self.isVisible():
-            return
-        try:
-            self._anim.finished.disconnect(self.hide)
-        except (RuntimeError, TypeError):
-            pass
-        parent = self.parentWidget()
-        if parent is None:
-            self.hide()
-            return
-        self._anim.stop()
-        self._anim.setStartValue(self.pos())
-        self._anim.setEndValue(QPoint(parent.width() + self.width(), self.y()))
-        self._anim.finished.connect(self.hide)
-        self._anim.start()
-
-    def _visible_pos(self) -> QPoint:
-        """Return the on-screen anchor point for the notification."""
-        parent = self.parentWidget()
-        if parent is None:
-            return QPoint(0, self._anchor_y)
-        x = parent.width() - self.width() - self._MARGIN
-        return QPoint(x, self._anchor_y)
-
-    def reposition(self, *, anchor_y: int | None = None) -> None:
-        """Reposition the notification to its anchored location if currently visible."""
-        if anchor_y is not None:
-            self._anchor_y = anchor_y
-        if not self.isVisible():
-            return
-        self.move(self._visible_pos())
-
-    def _apply_kind(self, kind: str) -> None:
-        spec = _NOTICE_KIND.get(kind, _NOTICE_KIND["warning"])
-        bg = styles.get_bg()
-        text = get_text_colors()
-        selection = get_selection_colors()
-        accent = spec["color"] or selection["nav_accent"]
-        accent_color = QColor(accent)
-        tint = spec["tint"] or f"rgba({accent_color.red()},{accent_color.green()},{accent_color.blue()},0.12)"
-
-        self.setStyleSheet(
-            f"#SlidingNotification {{"
-            f" background-color: {bg['bg']};"
-            f" border: 1px solid {bg['border']};"
-            f" border-left: 3px solid {accent};"
-            f" }}"
-        )
-        self._symbol.setText(spec["symbol"])
-        self._symbol.setStyleSheet(
-            f"color: {accent}; background: transparent; font-family: 'Courier New', monospace; font-size: 12pt;"
-        )
-        self._title.setStyleSheet(
-            f"color: {text['text']}; background: transparent; font-family: 'Courier New', monospace; font-size: 9pt; font-weight: bold;"
-        )
-        self._message.setStyleSheet(
-            f"color: {text['text_dim']}; background: transparent; font-family: 'Courier New', monospace; font-size: 9pt;"
-        )
-        self._close.setVisible(self._show_close)
-        self._close.setStyleSheet(
-            f"QPushButton {{ color: {text['text_dim']}; background: {tint}; border: none; font-family: 'Courier New', monospace; font-size: 10pt; }}"
-            f"QPushButton:hover {{ color: {accent}; }}"
-        )

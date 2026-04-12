@@ -3,16 +3,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QEnterEvent, QMouseEvent, QPainter, QPaintEvent, QPolygon, QContextMenuEvent
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSizePolicy
 
 from crucible.core.types import GameDict
 from crucible.ui.styles import get_text_colors
-from crucible.ui.theme_system import get_selection_colors
+from crucible.ui import styles
+from crucible.ui.theme_system import animations_enabled, get_bg, get_selection_colors
+from crucible.ui.color_utils import mix_hex
+from crucible.ui.tokens import ANIM_EASING, ANIM_HOVER_MS, ROW_HEIGHT, SPACE_MD
+from crucible.ui.widgets import init_styled
 
 
-_ROW = 38
+_ROW = ROW_HEIGHT
 _SIZE_WORKERS = max(1, min(4, (os.cpu_count() or 1)))
 
 
@@ -46,8 +50,8 @@ class _PlayBtn(QWidget):
         self.setFixedSize(24, _ROW)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         tc = get_text_colors()
-        self._col     = tc['text_dim']
-        self._hover   = tc['text']
+        self._col     = tc.text_dim
+        self._hover   = tc.text
         self._hovered = False
         self._stop    = False
 
@@ -100,8 +104,7 @@ class _EmptyLibrarySurface(QWidget):
     def __init__(self, accent_color: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._accent_color = accent_color
-        self.setObjectName("EmptyLibrarySurface")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        init_styled(self, "EmptyLibrarySurface")
         self._build_ui()
         self.refresh_styles()
 
@@ -128,14 +131,9 @@ class _EmptyLibrarySurface(QWidget):
         self.refresh_styles()
 
     def refresh_styles(self) -> None:
-        text = get_text_colors()
         self.setStyleSheet('background: transparent;')
-        self._title.setStyleSheet(
-            f"color: {text['text']}; background: transparent; font-family: 'Courier New', monospace; font-size: 12pt; font-weight: bold;"
-        )
-        self._subtitle.setStyleSheet(
-            f"color: {text['text_dim']}; background: transparent; font-family: 'Courier New', monospace; font-size: 9pt;"
-        )
+        self._title.setStyleSheet(styles.mono_label(dim=False, size="12pt", bold=True))
+        self._subtitle.setStyleSheet(styles.mono_label())
 
 
 class GameItemWidget(QWidget):
@@ -149,21 +147,19 @@ class GameItemWidget(QWidget):
         self.accent_color = accent_color
         self._running     = False
         self._selected    = False
-        self.setObjectName('GameItemWidget')
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        init_styled(self, 'GameItemWidget')
 
         tc = get_text_colors()
-        self._text_color = tc['text']
-        self._dim_color  = tc['text_dim']
+        self._text_color = tc.text
+        self._dim_color  = tc.text_dim
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setContentsMargins(SPACE_MD, 0, SPACE_MD, 0)
         layout.setSpacing(0)
 
         self._name_label = QLabel(game_data.get('name', 'Unknown'))
         self._name_label.setStyleSheet(
-            f"color: {self._text_color}; font-family: 'Courier New', monospace; font-size: 9pt;"
-            " background: transparent;"
+            styles.mono_label(dim=False, extra=f"color: {self._text_color};")
         )
         self._name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self._name_label)
@@ -174,8 +170,7 @@ class GameItemWidget(QWidget):
         self._runner_label = QLabel(proton)
         self._runner_label.setFixedWidth(100)
         self._runner_label.setStyleSheet(
-            f"color: {self._dim_color}; font-family: 'Courier New', monospace; font-size: 9pt;"
-            " background: transparent;"
+            styles.mono_label(extra=f"color: {self._dim_color};")
         )
         layout.addWidget(self._runner_label)
 
@@ -183,8 +178,7 @@ class GameItemWidget(QWidget):
         self._col_size_label.setFixedWidth(92)
         self._col_size_label.setContentsMargins(30, 0, 0, 0)
         self._col_size_label.setStyleSheet(
-            f"color: {self._dim_color}; font-family: 'Courier New', monospace; font-size: 9pt;"
-            " background: transparent;"
+            styles.mono_label(extra=f"color: {self._dim_color};")
         )
         layout.addWidget(self._col_size_label)
 
@@ -192,6 +186,14 @@ class GameItemWidget(QWidget):
         self._play_btn.set_colors(self._dim_color, accent_color)
         self._play_btn.clicked.connect(self._on_action)
         layout.addWidget(self._play_btn)
+
+        # Hover animation: interpolates 0.0→1.0 over ANIM_HOVER_MS
+        self._hover_anim = QVariantAnimation(self)
+        self._hover_anim.setStartValue(0.0)
+        self._hover_anim.setEndValue(1.0)
+        self._hover_anim.setDuration(ANIM_HOVER_MS)
+        self._hover_anim.setEasingCurve(ANIM_EASING)
+        self._hover_anim.valueChanged.connect(self._on_hover_step)
 
     @property
     def is_running(self) -> bool:
@@ -207,14 +209,12 @@ class GameItemWidget(QWidget):
         if running:
             self._play_btn.set_colors(self.accent_color, self.accent_color)
             self._name_label.setStyleSheet(
-                f"color: {self.accent_color}; font-family: 'Courier New', monospace;"
-                " font-size: 9pt; font-weight: bold; background: transparent;"
+                styles.mono_label(dim=False, bold=True, extra=f"color: {self.accent_color};")
             )
         else:
             self._play_btn.set_colors(self._dim_color, self.accent_color)
             self._name_label.setStyleSheet(
-                f"color: {self._text_color}; font-family: 'Courier New', monospace;"
-                " font-size: 9pt; background: transparent;"
+                styles.mono_label(dim=False, extra=f"color: {self._text_color};")
             )
 
     def set_size(self, size_str: str) -> None:
@@ -236,8 +236,8 @@ class GameItemWidget(QWidget):
         sel = get_selection_colors()
         if self._selected:
             self.setStyleSheet(
-                f"QWidget#GameItemWidget {{ background-color: {sel['selection_bg']};"
-                " border-left: 2px solid transparent; border-radius: 0px; }}"
+                f"QWidget#GameItemWidget {{ background-color: {sel.selection_bg};"
+                f" border-left: 2px solid {sel.nav_accent}; border-radius: 0px; }}"
             )
         else:
             self.setStyleSheet(
@@ -257,16 +257,33 @@ class GameItemWidget(QWidget):
         """Select this item when the context menu is requested."""
         self.selected.emit(self.game_data)
 
+    def _on_hover_step(self, t: float) -> None:
+        """Apply interpolated hover background at progress *t* (0.0–1.0)."""
+        if self._selected:
+            return
+        bg = get_bg()
+        sel = get_selection_colors()
+        hover_tint = mix_hex(bg.bg, sel.nav_accent, 0.08 * t)
+        self.setStyleSheet(
+            f"QWidget#GameItemWidget {{ background-color: {hover_tint};"
+            " border-left: 2px solid transparent; border-radius: 0px; }"
+        )
+
     def enterEvent(self, event: QEnterEvent) -> None:
-        """Apply hover background when the mouse enters this item."""
+        """Animate hover-in (or apply instantly when animations are disabled)."""
         if not self._selected:
-            self.setStyleSheet(
-                f"QWidget#GameItemWidget {{ background-color: {get_selection_colors()['hover_bg']};"
-                " border-left: 2px solid transparent; border-radius: 0px; }}"
-            )
+            if animations_enabled():
+                self._hover_anim.setDirection(QVariantAnimation.Direction.Forward)
+                self._hover_anim.start()
+            else:
+                self._on_hover_step(1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEnterEvent) -> None:
-        """Restore normal background when the mouse leaves this item."""
-        self._refresh_bg()
+        """Animate hover-out (or restore instantly when animations are disabled)."""
+        if animations_enabled() and not self._selected:
+            self._hover_anim.setDirection(QVariantAnimation.Direction.Backward)
+            self._hover_anim.start()
+        else:
+            self._refresh_bg()
         super().leaveEvent(event)

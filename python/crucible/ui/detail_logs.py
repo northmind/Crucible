@@ -9,7 +9,9 @@ from PyQt6.QtWidgets import QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidg
 
 from crucible.core.paths import Paths, clean_env
 from crucible.ui.styles import get_accent, get_text_colors
+from crucible.ui import styles
 from crucible.ui.theme_system import get_selection_colors
+from crucible.ui.tokens import SPACE_MD
 
 
 def build_logs_section(game: dict[str, str]) -> QWidget:
@@ -18,7 +20,7 @@ def build_logs_section(game: dict[str, str]) -> QWidget:
     widget = QWidget()
     widget.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(widget)
-    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setContentsMargins(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD)
     layout.setSpacing(0)
 
     name = game.get('name', '')
@@ -30,8 +32,8 @@ def build_logs_section(game: dict[str, str]) -> QWidget:
     visible_logs = logs[:2]
     if not visible_logs:
         lbl = QLabel("no logs yet")
-        lbl.setContentsMargins(8, 8, 0, 0)
-        lbl.setStyleSheet(f"color: {get_text_colors()['text_dim']}; background: transparent; font-family: 'Courier New', monospace; font-size: 8.5pt;")
+        lbl.setContentsMargins(SPACE_MD, SPACE_MD, 0, 0)
+        lbl.setStyleSheet(styles.mono_label(size="8.5pt"))
         lbl.setFixedHeight(28)
         layout.addWidget(lbl)
         widget.setFixedHeight(44)
@@ -68,12 +70,13 @@ def make_log_entry_button(path: Path, accent: str, label: str) -> QPushButton:
     btn.setFlat(True)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     sel = get_selection_colors()
-    btn.setStyleSheet(
-        f"QPushButton {{ color: {get_text_colors()['text_dim']}; background: transparent; border: none;"
-        f" text-align: left; font-family: 'Courier New', monospace; font-size: 8.5pt;"
-        f" padding: 8px 8px; border-radius: 0px; }}"
-        f"QPushButton:hover {{ color: {sel['selection_text']}; background: {sel['hover_bg']}; }}"
-    )
+    btn.setStyleSheet(styles.flat_button(
+        size="8.5pt",
+        hover_color=sel.selection_text,
+        hover_bg=sel.hover_bg,
+        padding="8px 8px",
+        extra="text-align: left; border-radius: 0px;",
+    ))
     btn.clicked.connect(
         lambda _=False, p=path: subprocess.Popen(
             ['xdg-open', str(p)], env=clean_env(), start_new_session=True

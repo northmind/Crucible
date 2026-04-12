@@ -5,6 +5,7 @@ from typing import Callable
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from crucible.ui.detail_widgets import _ActionRow, _AdvRow, _DangerRow, _ToolRow
+from crucible.ui.tokens import SPACE_XS
 
 
 def build_tools_section(
@@ -17,7 +18,7 @@ def build_tools_section(
     widget = QWidget()
     widget.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(widget)
-    layout.setContentsMargins(0, 4, 0, 4)
+    layout.setContentsMargins(0, SPACE_XS, 0, SPACE_XS)
     layout.setSpacing(0)
 
     for sec, label, env_var, _val_on in env_options:
@@ -45,7 +46,7 @@ def build_shortcut_section(
     widget = QWidget()
     widget.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(widget)
-    layout.setContentsMargins(0, 4, 0, 4)
+    layout.setContentsMargins(0, SPACE_XS, 0, SPACE_XS)
     layout.setSpacing(0)
 
     action_label = "Remove Desktop Shortcut" if has_shortcut else "Create Desktop Shortcut"
@@ -69,7 +70,7 @@ def build_danger_section(
     widget = QWidget()
     widget.setStyleSheet("background: transparent;")
     layout = QVBoxLayout(widget)
-    layout.setContentsMargins(0, 4, 0, 4)
+    layout.setContentsMargins(0, SPACE_XS, 0, SPACE_XS)
     layout.setSpacing(0)
 
     for label, action in actions:

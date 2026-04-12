@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QPushButton, QVBoxLayo
 
 from crucible.ui.styles import get_text_colors, line_accent_rgba
 from crucible.ui.theme_system import get_selection_colors
+from crucible.ui.tokens import FONT_BASE, FONT_MONO, FONT_XS
 
 
 class TabBar(QWidget):
@@ -25,7 +26,6 @@ class TabBar(QWidget):
         for i, label in enumerate(labels):
             btn = QPushButton(label)
             btn.setFlat(True)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _, idx=i: self.set_current_index(idx))
             self._btns.append(btn)
@@ -57,12 +57,12 @@ class TabBar(QWidget):
 
     def _refresh_styles(self) -> None:
         selection = get_selection_colors()
-        accent = selection['nav_accent']
-        active_text = selection['selection_text']
+        accent = selection.nav_accent
+        active_text = selection.selection_text
         colors = get_text_colors()
-        dim = colors['text_dim']
-        active_bg = selection['selection_bg']
-        hover_bg = selection['hover_bg']
+        dim = colors.text_dim
+        active_bg = selection.selection_bg
+        hover_bg = selection.hover_bg
 
         for i, btn in enumerate(self._btns):
             is_active = i == self._active
@@ -71,14 +71,14 @@ class TabBar(QWidget):
                     f"QPushButton {{ background: {active_bg if is_active else 'transparent'}; color: {active_text if is_active else dim};"
                     f" border: none; border-bottom: 1px solid {accent if is_active else 'transparent'};"
                     f" border-radius: 0px; padding: 0 12px; min-width: 0;"
-                    f" font-family: 'Courier New', monospace; font-size: 9pt; }}"
+                    f" font-family: {FONT_MONO}; font-size: {FONT_BASE}pt; }}"
                     f"QPushButton:hover {{ color: {accent}; background: {active_bg if is_active else hover_bg}; }}"
                 )
             else:
                 btn.setStyleSheet(
                     f"QPushButton {{ background: {active_bg if is_active else 'transparent'}; color: {active_text if is_active else dim}; border: none;"
                     f" border-radius: 0px; padding: 0 11px; min-width: 0;"
-                    f" font-family: 'Courier New', monospace; font-size: 8.5pt; text-align: left; }}"
+                    f" font-family: {FONT_MONO}; font-size: {FONT_XS}pt; text-align: left; }}"
                     f"QPushButton:hover {{ color: {accent}; background: {active_bg if is_active else hover_bg}; }}"
                 )
 
@@ -91,7 +91,6 @@ class _SectionHeaderButton(QAbstractButton):
         self._color = color
         self._hover_color = hover_color
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedHeight(28)
 
     def set_expanded(self, expanded: bool) -> None:
@@ -108,11 +107,11 @@ class _SectionHeaderButton(QAbstractButton):
         try:
             selection = get_selection_colors()
             colors = get_text_colors()
-            accent = QColor(selection['nav_accent'])
-            default_color = QColor(self._color or colors['text_dim'])
-            title_color = QColor(selection['selection_text']) if self._expanded else default_color
+            accent = QColor(selection.nav_accent)
+            default_color = QColor(self._color or colors.text_dim)
+            title_color = QColor(selection.selection_text) if self._expanded else default_color
             if self.underMouse():
-                title_color = QColor(self._hover_color or selection['nav_accent'])
+                title_color = QColor(self._hover_color or selection.nav_accent)
             font = QFont('Courier New', 8)
             font.setStyleHint(QFont.StyleHint.TypeWriter)
             painter.setFont(font)

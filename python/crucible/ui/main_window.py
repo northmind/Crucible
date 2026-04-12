@@ -23,7 +23,8 @@ from crucible.ui.proton_panel import ProtonPanel, PANEL_W as PROTON_PANEL_W
 from crucible.core.managers import GameManager
 from crucible.core.proton_manager import ProtonManager
 from crucible.core.workers import UmuUpdateWorker, register_worker
-from crucible.ui.widgets import SlidingNotification
+from crucible.ui.notification import SlidingNotification
+from crucible.ui.tokens import SPACE_XL
 
 
 class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindow):
@@ -133,6 +134,7 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
         self.detail_panel.game_updated.connect(self._on_game_updated)
         self.detail_panel.game_deleted.connect(self._on_game_deleted)
         self.detail_panel.panel_width_changed.connect(self._on_panel_width_changed)
+        self._panel_host.width_changed.connect(self._on_host_width_changed)
         self.library_widget.artwork_manager.install_dir_resolved.connect(
             self._on_install_dir_resolved,
         )
@@ -148,7 +150,10 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
         return self._panel_width_for_key(self._active_panel_key)
 
     def _panel_width_for_key(self, key: str | None) -> int:
-        """Return the fixed width associated with a panel key."""
+        """Return the width for a panel key, preferring user-resized width."""
+        custom = self._panel_host.get_custom_width()
+        if custom is not None:
+            return custom
         if key == PANEL_DETAIL:
             return self._edit_panel_w
         if key == PANEL_SETTINGS:
@@ -168,6 +173,15 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
 
     def _apply_main_layout_margins(self) -> None:
         self.main_layout.setContentsMargins(0, 0, self._panel_margin_right, 0)
+
+    def _on_host_width_changed(self, new_width: int) -> None:
+        """Respond to the user dragging the panel resize handle."""
+        if not self._panel_open:
+            return
+        self._panel_host.setGeometry(self._panel_geometry(True))
+        self._panel_margin_right = new_width
+        self._apply_main_layout_margins()
+        self._sync_titlebar_seam()
 
     # ------------------------------------------------------------------
     # Initialisation helpers
@@ -244,7 +258,7 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
     # ------------------------------------------------------------------
 
     def _notification_anchor_y(self) -> int:
-        return self.titlebar.height() + 16
+        return self.titlebar.height() + SPACE_XL
 
     def _show_notification(self, title: str, message: str, kind: str = "warning") -> None:
         """Display a sliding notification banner."""
