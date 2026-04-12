@@ -298,6 +298,11 @@ def get_settings() -> QSettings:
     return QSettings(_ORG_NAME, _APP_NAME)
 
 
+def get_active_builtin_key() -> str:
+    """Return the key of the currently active builtin theme (default ``'crucible'``)."""
+    return str(get_settings().value(_THEME_KEY, "crucible", type=str) or "crucible")
+
+
 def get_active_saved_theme_slug() -> str:
     """Return the slug of the currently active saved theme, or ``''`` if none."""
     return get_settings().value(_THEME_SAVED_SLUG_KEY, "", type=str) or ""

@@ -11,6 +11,7 @@ from crucible.ui.theme_system import (
     apply_builtin_theme,
     apply_saved_imported_theme,
     builtin_themes,
+    get_active_builtin_key,
     get_active_saved_theme_slug,
     list_saved_imported_themes,
     remove_saved_imported_theme,
@@ -20,6 +21,7 @@ from crucible.ui.theme_system import (
 
 _THEME_DESCRIPTIONS = {
     "crucible": "by Nakama",
+    "high-contrast": "WCAG AAA · high visibility",
 }
 
 
@@ -32,8 +34,9 @@ class SettingsThemeMixin:
         if self._selected_saved_slug:
             self._selected_theme = None
         else:
+            active_key = get_active_builtin_key()
             self._selected_theme = next(
-                (theme for theme in builtin_themes() if theme.key == "crucible"),
+                (theme for theme in builtin_themes() if theme.key == active_key),
                 builtin_themes()[0],
             )
         self._render_saved_themes()
@@ -49,11 +52,12 @@ class SettingsThemeMixin:
         self._theme_btns.clear()
         self._saved_btns.clear()
 
-        crucible = next(theme for theme in builtin_themes() if theme.key == "crucible")
-        crucible_btn = _ThemeBtn(crucible, _THEME_DESCRIPTIONS["crucible"], False)
-        crucible_btn.clicked.connect(lambda _, theme=crucible: self._select_local_theme(theme))
-        self._theme_btns[crucible.key] = crucible_btn
-        self._saved_layout.addWidget(crucible_btn)
+        for theme in builtin_themes():
+            desc = _THEME_DESCRIPTIONS.get(theme.key, "builtin theme")
+            btn = _ThemeBtn(theme, desc, False)
+            btn.clicked.connect(lambda _, t=theme: self._select_local_theme(t))
+            self._theme_btns[theme.key] = btn
+            self._saved_layout.addWidget(btn)
 
         for saved in self._saved_themes:
             subtitle = f"by {saved.author}"
