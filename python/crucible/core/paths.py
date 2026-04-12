@@ -81,6 +81,7 @@ def find_app_id_in_game_dir(game_root: str) -> str | None:
 
 _APPIMAGE_KEYS = (
     'LD_LIBRARY_PATH', 'LD_PRELOAD',
+    'PYTHONHOME', 'PYTHONPATH',
     'QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH',
     'QT_QPA_FONTDIR', 'QTDIR', 'QT_XKB_CONFIG_ROOT',
 )
@@ -92,12 +93,45 @@ _DESKTOP_LAUNCH_KEYS = (
     'BAMF_DESKTOP_FILE_HINT',
     'GIO_LAUNCHED_DESKTOP_FILE', 'GIO_LAUNCHED_DESKTOP_FILE_PID',
 )
+# Keys saved by AppRun as CRUCIBLE_ORIG_<KEY> before AppImage overrides them.
+_APPIMAGE_SAVED_KEYS = (
+    'LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH',
+    'QT_PLUGIN_PATH', 'PATH',
+)
+
+
+def _is_appimage() -> bool:
+    """Return True if running inside an AppImage (APPDIR is set)."""
+    return 'APPDIR' in os.environ
+
+
+def _restore_or_remove(env: dict[str, str], key: str) -> None:
+    """Restore *key* from its ``CRUCIBLE_ORIG_`` backup, or remove it entirely."""
+    orig_key = f'CRUCIBLE_ORIG_{key}'
+    orig_val = env.get(orig_key, '')
+    if orig_val:
+        env[key] = orig_val
+    else:
+        env.pop(key, None)
+    env.pop(orig_key, None)
 
 
 def clean_env() -> dict[str, str]:
-    """Return a copy of ``os.environ`` with AppImage-injected variables removed."""
+    """Return a copy of ``os.environ`` suitable for launching child tools.
+
+    In AppImage mode the bundled ``PYTHONHOME``, ``PYTHONPATH``,
+    ``QT_PLUGIN_PATH`` and ``LD_LIBRARY_PATH`` are restored to their
+    pre-AppImage values (saved by ``AppRun`` as ``CRUCIBLE_ORIG_*``).
+    AppImage identity vars (``APPDIR``, ``APPIMAGE``, ``OWD``) are removed.
+    """
     env = os.environ.copy()
-    for key in _APPIMAGE_KEYS + ('APPDIR', 'APPIMAGE', 'OWD'):
+    if _is_appimage():
+        for key in _APPIMAGE_SAVED_KEYS:
+            _restore_or_remove(env, key)
+    for key in _APPIMAGE_KEYS:
+        if key not in _APPIMAGE_SAVED_KEYS:
+            env.pop(key, None)
+    for key in ('APPDIR', 'APPIMAGE', 'OWD'):
         env.pop(key, None)
     return env
 
@@ -122,12 +156,25 @@ def artwork_safe_name(name: str) -> str:
 
 
 def strip_launch_env(env: dict[str, str]) -> None:
-    """Remove desktop-launch and AppImage identity variables from *env* in place."""
+    """Remove desktop-launch and AppImage variables from *env* in place.
+
+    In AppImage mode, ``CRUCIBLE_ORIG_*`` values (saved by ``AppRun``) are
+    restored so child processes (games, umu-run) see the user's original
+    environment rather than the AppImage's bundled paths.
+    """
     for key in _DESKTOP_LAUNCH_KEYS + _APPIMAGE_IDENTITY_KEYS:
         env.pop(key, None)
-    if 'APPDIR' in os.environ:
+    if _is_appimage():
+        for key in _APPIMAGE_SAVED_KEYS:
+            _restore_or_remove(env, key)
+        # Remove remaining AppImage-only vars not in _APPIMAGE_SAVED_KEYS
         for key in _APPIMAGE_KEYS:
-            env.pop(key, None)
+            if key not in _APPIMAGE_SAVED_KEYS:
+                env.pop(key, None)
+    # Clean up any leftover CRUCIBLE_ORIG_ keys
+    for key in list(env):
+        if key.startswith('CRUCIBLE_ORIG_'):
+            del env[key]
 
 
 def ensure_within_dir(base_dir: Path, candidate: Path) -> None:

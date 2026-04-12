@@ -198,6 +198,16 @@ PILLOW_LIBS="usr/lib/python${PYTHON_VERSION}/site-packages/pillow.libs"
 cat > AppDir/AppRun << APPRUN
 #!/bin/bash
 HERE="\$(dirname "\$(readlink -f "\$0")")"
+
+# Save the user's original environment BEFORE we overwrite with AppImage paths.
+# Crucible restores these when launching child processes (games, umu-run) so
+# they don't inherit our bundled Python/Qt/library paths.
+export CRUCIBLE_ORIG_LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:-}"
+export CRUCIBLE_ORIG_PYTHONHOME="\${PYTHONHOME:-}"
+export CRUCIBLE_ORIG_PYTHONPATH="\${PYTHONPATH:-}"
+export CRUCIBLE_ORIG_QT_PLUGIN_PATH="\${QT_PLUGIN_PATH:-}"
+export CRUCIBLE_ORIG_PATH="\${PATH:-}"
+
 export PYTHONHOME="\$HERE/usr"
 export PYTHONPATH="\$HERE/usr/share/crucible:\$HERE/usr/lib/python${PYTHON_VERSION}/site-packages"
 export LD_LIBRARY_PATH="\$HERE/usr/lib:\$HERE/${QT6_LIB}:\$HERE/${PILLOW_LIBS}\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
