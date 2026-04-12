@@ -203,6 +203,23 @@ BUILTIN_THEMES: list[Theme] = [
         status_info="#61afef",
         danger_hover="#d27186",
     ),
+    _build_theme(
+        name="High Contrast",
+        key="high-contrast",
+        accent="#FFD700",
+        accent_soft="#2a2400",
+        bg="#000000",
+        border="#444444",
+        text="#FFFFFF",
+        text_dim="#B0B0B0",
+        chrome_bg="#0a0a0a",
+        status_warning="#FFD700",
+        status_error="#FF6B6B",
+        status_success="#00E676",
+        status_info="#40C4FF",
+        danger_hover="#FF8A80",
+        text_disabled="#666666",
+    ),
 ]
 _THEME_BY_KEY = {theme.key: theme for theme in BUILTIN_THEMES}
 
