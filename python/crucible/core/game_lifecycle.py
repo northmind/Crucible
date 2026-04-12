@@ -15,6 +15,7 @@ from crucible.core.paths import (
     find_game_root,
     safe_name,
 )
+from crucible.core.events import event_bus
 from crucible.core.types import GameDict
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ class GameLifecycleMixin:
                 if prefix_path.exists():
                     shutil.rmtree(prefix_path)
             self.scan_games()
+            event_bus.game_removed.emit(name)
             return True
         except OSError as exc:
             logger.error(f"Failed to remove {name}: {exc}")

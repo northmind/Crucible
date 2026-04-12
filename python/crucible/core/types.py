@@ -1,6 +1,29 @@
 """Shared type definitions for the Crucible Launcher."""
 
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TypedDict
+
+
+class GamescopeSettings(TypedDict, total=False):
+    """Structured gamescope configuration.
+
+    Mirrors Heroic's ``GameScopeSettings`` interface.  All values are
+    strings so they round-trip through JSON without type coercion.
+    """
+
+    enable_upscaling: bool
+    enable_limiter: bool
+    enable_force_grab_cursor: bool
+    window_type: str         # "fullscreen" | "borderless" | "windowed"
+    game_width: str          # inner render width, e.g. "1280"
+    game_height: str         # inner render height
+    upscale_width: str       # gamescope output width
+    upscale_height: str      # gamescope output height
+    upscale_method: str      # "fsr" | "nis" | "integer" | "stretch"
+    fps_limiter: str         # max FPS when focused
+    fps_limiter_no_focus: str  # max FPS when unfocused
+    additional_options: str  # raw CLI flags appended verbatim
 
 
 class GameDict(TypedDict, total=False):
@@ -10,6 +33,9 @@ class GameDict(TypedDict, total=False):
     by :meth:`crucible.core.managers.GameManager.add_game`.  The ``game_file`` key is
     injected at runtime by :meth:`~crucible.core.managers.GameManager.scan_games` and
     is never serialised to disk.
+
+    Keys that also appear in :class:`crucible.core.global_config.GlobalConfig`
+    support two-tier inheritance: a per-game value overrides the global default.
     """
 
     name: str
@@ -24,4 +50,27 @@ class GameDict(TypedDict, total=False):
     fingerprint_lock: bool
     wrapper_command: str
     exe_match_mode: str
+    pre_launch_script: str
+    post_launch_script: str
+    enable_gamemode: bool
+    enable_gamescope: bool
+    gamescope_settings: GamescopeSettings
     game_file: str  # runtime-only, not persisted
+
+
+@dataclass
+class LaunchContext:
+    """Carries state through the validate → prepare → execute pipeline."""
+
+    game: dict                              # raw game dict from scan
+    resolved: dict = field(default_factory=dict)  # after GlobalConfig merge
+    exe_path: str = ""
+    proton_path: str = ""
+    umu: str = ""
+    sname: str = ""
+    prefix_path: Path = field(default_factory=Path)
+    log_file_path: Path = field(default_factory=Path)
+    env: dict[str, str] = field(default_factory=dict)
+    game_uuid: str = ""
+    game_cmd: list[str] = field(default_factory=list)
+    cwd: str = ""

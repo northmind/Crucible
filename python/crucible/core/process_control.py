@@ -15,6 +15,73 @@ logger = logging.getLogger(__name__)
 _REAP_DEADLINE_SECS = 5
 _REAP_POLL_INTERVAL_SECS = 0.2
 _DBUS_TIMEOUT_SECS = 5
+_PIPE_READ_BUFSIZE = 32
+
+
+def detached_fork(cmd: list[str], env: dict[str, str], cwd: str, log_file_path: Path) -> int:
+    """Double-fork to detach a process from the caller's process tree.
+
+    KDE groups windows by process tree.  ``Popen(start_new_session=True)``
+    is insufficient — only a true double-fork reparents to PID 1.
+    Returns the grandchild PID, or 0 on failure.
+    """
+    r_fd, w_fd = os.pipe()
+    child = os.fork()
+    if child == 0:
+        try:
+            os.close(r_fd)
+            os.setsid()
+            grandchild = os.fork()
+            if grandchild == 0:
+                try:
+                    os.close(w_fd)
+                    devnull = os.open('/dev/null', os.O_RDONLY)
+                    os.dup2(devnull, 0)
+                    os.close(devnull)
+                    log_fd = os.open(
+                        str(log_file_path),
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644,
+                    )
+                    os.dup2(log_fd, 1)
+                    os.dup2(log_fd, 2)
+                    os.close(log_fd)
+                    os.chdir(cwd)
+                    os.execvpe(cmd[0], cmd, env)
+                except Exception as exc:
+                    os.write(2, f"Failed to launch {cmd[0]}: {exc}\n".encode(errors='replace'))
+                os._exit(1)
+            else:
+                os.write(w_fd, str(grandchild).encode())
+                os.close(w_fd)
+                os._exit(0)
+        except Exception as exc:
+            logger.debug(f"Detached fork failed for {cmd[0]}: {exc}")
+            try:
+                os.write(w_fd, b'0')
+                os.close(w_fd)
+            except OSError:
+                pass
+            os._exit(1)
+    os.close(w_fd)
+    buf = b''
+    while True:
+        try:
+            chunk = os.read(r_fd, _PIPE_READ_BUFSIZE)
+            if not chunk:
+                break
+            buf += chunk
+        except OSError:
+            break
+    os.close(r_fd)
+    try:
+        os.waitpid(child, 0)
+    except OSError as exc:
+        logger.debug(f"waitpid failed for child {child}: {exc}")
+    try:
+        return int(buf.strip())
+    except ValueError as exc:
+        logger.debug(f"Failed to parse pid from {buf!r}: {exc}")
+        return 0
 
 
 class ProcessControlMixin:

@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.fingerprint import FingerprintManager
+from crucible.core.events import event_bus
 from crucible.core.game_lifecycle import GameLifecycleMixin
 from crucible.core.game_utils import _build_dll_overrides, _load_json_file, _write_json_file
+from crucible.core.global_config import GlobalConfig
 from crucible.core.launcher import GameLauncher
 from crucible.core.types import GameDict
 from crucible.core.paths import (
@@ -29,6 +31,7 @@ class GameManager(GameLifecycleMixin):
         self.prefixes_dir = self.data_dir / "Prefix"
         self.games = []
         self.fingerprint = FingerprintManager(self.data_dir / 'fingerprints')
+        self.global_config = GlobalConfig()
 
         self.games_dir.mkdir(exist_ok=True)
         self.prefixes_dir.mkdir(exist_ok=True)
@@ -52,6 +55,9 @@ class GameManager(GameLifecycleMixin):
             data.update(updates)
             self._write_game_record(game_file, data)
             self.scan_games()
+            game_name = data.get('name', '')
+            if game_name:
+                event_bus.game_updated.emit(game_name)
             return True
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.error(f"Failed to update game record {game_file}: {exc}")
@@ -101,6 +107,7 @@ class GameManager(GameLifecycleMixin):
                 self.games.append(data)
             except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 logger.error(f"Error reading {game_file}: {exc}")
+        event_bus.library_refreshed.emit()
         return self.games
 
     def get_games(self) -> list[GameDict]:
@@ -171,6 +178,7 @@ class GameManager(GameLifecycleMixin):
         try:
             self._write_game_record(game_file, data)
             self.scan_games()
+            event_bus.game_added.emit(name)
             return True
         except OSError as exc:
             logger.error(f"Failed to save game: {exc}")

@@ -25,6 +25,7 @@ from crucible.core.proton_manager import ProtonManager
 from crucible.core.workers import UmuUpdateWorker, register_worker
 from crucible.ui.notification import SlidingNotification
 from crucible.ui.tokens import SPACE_XL
+from crucible.ui.tray import SystemTrayIcon
 
 
 class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindow):
@@ -114,7 +115,21 @@ class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindo
         self.resize_handles = setup_resize_handles(self)
         self.setAcceptDrops(True)
         self._connect_signals()
+
+        self._tray = SystemTrayIcon(self)
+        self._tray.show()
+        self._minimize_to_tray = True
+
         QTimer.singleShot(100, self._load_initial_data)
+
+    def closeEvent(self, event) -> None:
+        """Minimize to tray instead of quitting (when tray is available)."""
+        if self._minimize_to_tray and self._tray.isVisible():
+            event.ignore()
+            self.hide()
+        else:
+            self._tray.hide()
+            super().closeEvent(event)
 
     def _connect_signals(self) -> None:
         """Wire up all inter-widget signals."""
