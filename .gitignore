@@ -8,6 +8,11 @@
 !README.md
 !python/
 !python/**
+!build.sh
+!devbox.json
+!devbox.lock
+!requirements.txt
+!requirements-dev.txt
 
 # Re-ignore build artifacts inside python/
 __pycache__/
