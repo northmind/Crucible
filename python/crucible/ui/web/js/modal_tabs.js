@@ -120,8 +120,8 @@ function renderTabData(g) {
         '<div class="section-title danger">Destructive Actions</div>' +
         '<div class="section-desc">These actions are irreversible. Proceed with caution.</div>' +
         '<div class="section">' +
-            sActionRow('Reset Wine Prefix', 'Deletes the entire wine prefix directory. Irreversible.', 'reset-prefix', 'danger') +
-            sActionRow('Remove Game Data', 'Delete game config and remove from your library.', 'remove-game', 'danger') +
+            sActionRow('Remove Prefix', 'Deletes the Wine prefix.', 'reset-prefix', 'danger') +
+            sActionRow('Remove Game', 'Deletes the Wine prefix and all Crucible data. Game files stay on disk.', 'remove-game', 'danger') +
         '</div>' +
     '</div>';
 }
