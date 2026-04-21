@@ -18,7 +18,7 @@ for tool in wget patchelf file strip ldd sha256sum; do
     fi
 done
 
-VENV_PYTHON="$(readlink -f .venv/bin/python3)"
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
 PYTHON_VERSION="$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 PYTHON_PREFIX="$("$VENV_PYTHON" -c 'import sys; print(sys.base_prefix)')"
 SITE_PACKAGES="$("$VENV_PYTHON" -c 'import site; print(site.getsitepackages()[0])')"
