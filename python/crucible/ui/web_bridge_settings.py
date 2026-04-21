@@ -26,13 +26,29 @@ class WebBridgeSettingsMixin:
 
     # --- Proton / Wine Runners ---
 
+    def ensureDefaultRunner(self) -> str:
+        """Persist the newest installed runner when no valid default is set."""
+        names = self._pm.get_installed_names()
+        gc = self._gm.global_config
+        current = str(gc.get("proton_version") or "")
+        if current and current in names:
+            return current
+        if not names:
+            return current
+        default_runner = names[0]
+        gc.set("proton_version", default_runner)
+        return default_runner
+
     @pyqtSlot(str, result="QVariant")
     def getInstalledRunnersForSource(self, source: str) -> list[dict]:
         self._pm.scan_installed()
+        self.ensureDefaultRunner()
         return [r for r in self._pm.installed if r.get('source') == source]
 
     @pyqtSlot(result="QVariant")
     def getRunnerNames(self) -> list[str]:
+        self._pm.scan_installed()
+        self.ensureDefaultRunner()
         return self._pm.get_installed_names()
 
     @pyqtSlot(str, result="QVariant")
@@ -53,6 +69,7 @@ class WebBridgeSettingsMixin:
                 tag, progress_callback=_progress, source=source,
             )
             if ok:
+                self.ensureDefaultRunner()
                 self.toastRequested.emit(f"Installed {tag}", "success")  # type: ignore[attr-defined]
                 self.protonChanged.emit()  # type: ignore[attr-defined]
             else:
@@ -63,6 +80,7 @@ class WebBridgeSettingsMixin:
     def deleteRunner(self, tag: str) -> bool:
         ok = self._pm.delete_version(tag)
         if ok:
+            self.ensureDefaultRunner()
             self.protonChanged.emit()  # type: ignore[attr-defined]
         return ok
 
@@ -101,6 +119,7 @@ class WebBridgeSettingsMixin:
                 extra_dirs = [Path(value)] if str(value).strip() else []
                 self._pm.set_search_dirs(extra_dirs)
                 self._pm.scan_installed()
+                self.ensureDefaultRunner()
                 self.protonChanged.emit()  # type: ignore[attr-defined]
             elif key == "sidebar_collapsed":
                 return

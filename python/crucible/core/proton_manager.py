@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -97,8 +98,22 @@ class ProtonManager:
                     'version': version,
                     'source': self._guess_source(name),
                 })
-        self.installed.sort(key=lambda x: x['name'], reverse=True)
+        self.installed.sort(key=lambda x: self._runner_sort_key(x['name']), reverse=True)
         return self.installed
+
+    @staticmethod
+    def _runner_sort_key(name: str) -> tuple[tuple[int, int | str], ...]:
+        """Return a natural-sort key so newer runner names sort first."""
+        parts = re.split(r'(\d+)', name.lower())
+        key: list[tuple[int, int | str]] = []
+        for part in parts:
+            if not part:
+                continue
+            if part.isdigit():
+                key.append((1, int(part)))
+            else:
+                key.append((0, part))
+        return tuple(key)
 
     def get_installed_names(self) -> list[str]:
         return [v['name'] for v in self.installed]

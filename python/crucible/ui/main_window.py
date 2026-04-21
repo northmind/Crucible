@@ -270,6 +270,7 @@ class MainWindow(QMainWindow):
             self.proton_manager.add_search_dir(Path(extra))
         self.game_manager.scan_games()
         self.proton_manager.scan_installed()
+        self._bridge.ensureDefaultRunner()
         self._bridge.gamesChanged.emit()
         self._bridge.protonChanged.emit()
         if auto_update_umu():
