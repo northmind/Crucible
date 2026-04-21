@@ -124,7 +124,14 @@ class WebBridge(WebBridgeSettingsMixin, WebBridgeUIMixin, QObject):
         )
         if ok:
             self._artwork.fetch_artwork(name, exe_path)
-            return {"success": True, "name": name}
+            return {
+                "success": True,
+                "game": {
+                    "name": name,
+                    "exe_path": exe_path,
+                    "install_dir": install_dir,
+                },
+            }
         return {"success": False, "error": "Failed to add game"}
 
     @pyqtSlot(str, result="QVariant")
@@ -309,7 +316,7 @@ class WebBridge(WebBridgeSettingsMixin, WebBridgeUIMixin, QObject):
         if not game:
             return {"success": False, "message": "Game not found"}
         ok, msg = self._gm.create_game_shortcut(game)
-        return {"success": ok, "message": msg}
+        return {"success": ok, "message": "Shortcut created" if ok else msg}
 
     @pyqtSlot(str, result=bool)
     def hasShortcut(self, name: str) -> bool:

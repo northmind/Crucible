@@ -92,9 +92,9 @@ class GameLifecycleMixin:
                 if d.is_dir():
                     shutil.rmtree(d, ignore_errors=True)
 
-            game_log_dir = Paths.game_logs_dir(name)
-            for log_file in game_log_dir.glob("*.log"):
-                log_file.unlink(missing_ok=True)
+            game_log_dir = Paths.logs_dir() / 'games' / safe_name(name)
+            if game_log_dir.is_dir():
+                shutil.rmtree(game_log_dir, ignore_errors=True)
 
             self.fingerprint.clear(name)
             self.launcher.remove_game_shortcut(name)

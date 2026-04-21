@@ -231,9 +231,30 @@ select.input-field option { background: var(--bg-surface); color: var(--text-mai
     position: relative; overflow: hidden; cursor: pointer;
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
+.game-card.pending-artwork {
+    background: linear-gradient(135deg, var(--bg-surface), var(--bg-surface-hover));
+}
 .game-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease, filter 0.3s ease; }
 .game-card:hover { transform: translateY(-8px) scale(1.02); z-index: 2; }
 .game-card:hover img { transform: scale(1.05); filter: brightness(1.1); }
+.game-card.pending-artwork img { filter: brightness(0.5) saturate(0.8); }
+.game-card-overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    background: linear-gradient(180deg, rgba(8, 10, 14, 0.28), rgba(8, 10, 14, 0.72));
+    color: var(--text-main); text-align: center; padding: 20px;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+    backdrop-filter: blur(4px);
+}
+.game-card-spinner {
+    width: 28px; height: 28px; border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: var(--accent);
+    animation: card-spinner 0.9s linear infinite;
+}
+@keyframes card-spinner {
+    to { transform: rotate(360deg); }
+}
 
 /* Add game card */
 .add-game-card {
@@ -258,10 +279,16 @@ select.input-field option { background: var(--bg-surface); color: var(--text-mai
     transform: translateX(120%);
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     pointer-events: auto; font-size: 14px; font-weight: 500;
-    width: max-content; max-width: 420px; min-width: 200px;
+    max-width: min(560px, calc(100vw - 48px));
 }
 .toast.show { transform: translateX(0); }
-.toast-icon { color: var(--accent); display: flex; }
+.toast-icon { color: var(--accent); display: flex; flex: 0 0 auto; }
+.toast > div:last-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: break-word;
+    word-break: normal;
+}
 
 /* Theme grid */
 .theme-grid {

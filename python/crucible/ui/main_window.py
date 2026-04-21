@@ -6,6 +6,7 @@ manages system tray, geometry save/restore, and edge resize handles.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -179,7 +180,14 @@ class MainWindow(QMainWindow):
     def _add_dropped_exe(self, exe_path: str) -> None:
         result = self._bridge.addGame(exe_path)
         if result.get("success"):
-            self._toast(f"Added {result['name']}")
+            game = result.get("game") or {}
+            name = game.get("name") or result.get("name") or "game"
+            if game:
+                game_json = json.dumps(game)
+                self._run_js(
+                    f"if(window.insertPendingGameCard) insertPendingGameCard({game_json})",
+                )
+            self._toast(f"Added {name}")
         else:
             self._toast(result.get("error", "Failed to add game"), "error")
 
