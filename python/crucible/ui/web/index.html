@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" style="background:#09090b">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crucible</title>
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/modal.css">
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+    <aside class="sidebar" id="main-sidebar">
+        <div class="brand">
+            <span class="brand-text">Crucible<span class="version-text">beta</span></span>
+        </div>
+        <nav class="nav-group">
+            <div class="nav-item active" data-view="library">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                <span>Library</span>
+            </div>
+            <div class="nav-item" data-view="runners">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <span>Wine Cabinet</span>
+            </div>
+            <div class="nav-item" data-view="settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Settings</span>
+            </div>
+        </nav>
+        <div class="sidebar-toggle" id="sidebar-toggle">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </div>
+    </aside>
+
+    <main class="main-container">
+        <header class="topbar">
+            <div class="drag-region" id="drag-region"></div>
+            <div class="window-controls">
+                <span class="wc-min" id="wc-min"></span>
+                <span class="wc-max" id="wc-max"></span>
+                <span class="wc-close" id="wc-close"></span>
+            </div>
+        </header>
+
+        <div id="view-library" class="view-content active">
+            <div class="game-grid" id="library-grid"></div>
+        </div>
+
+        <div id="view-runners" class="view-content">
+            <div class="cabinet-layout">
+                <div class="cabinet-sidebar" id="cabinet-sidebar"></div>
+                <div class="cabinet-content" id="cabinet-content"></div>
+            </div>
+        </div>
+
+        <div id="view-settings" class="view-content">
+            <div class="settings-layout">
+                <div class="settings-sidebar" id="settings-sidebar"></div>
+                <div class="settings-content" id="settings-content"></div>
+            </div>
+        </div>
+
+        <div id="hero-modal" class="hero-modal"></div>
+    </main>
+
+    <div id="toast-container"></div>
+
+    <script src="js/bridge.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/library.js"></script>
+    <script src="js/runners.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/modal_tabs.js"></script>
+    <script src="js/modal.js"></script>
+</body>
+</html>
