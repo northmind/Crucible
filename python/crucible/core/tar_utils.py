@@ -38,8 +38,7 @@ def extract_tarball(tar_path: str | Path, dest_dir: str | Path) -> Path:
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    mode = 'r:xz' if str(tar_path).endswith('.tar.xz') else 'r:gz'
-    with tarfile.open(tar_path, mode) as tar:
+    with tarfile.open(tar_path, 'r:*') as tar:
         validate_tar_members(tar, dest_dir)
         tar.extractall(dest_dir, filter='data')
 

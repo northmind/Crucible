@@ -1,5 +1,6 @@
 import sys
 from crucible.core.logger import setup_logging
+from crucible.core.runner_bootstrap import ensure_seeded_runner
 
 
 def _launch_game(game_name: str) -> int:
@@ -40,6 +41,7 @@ def _gui():
 
 def main() -> None:
     logger = setup_logging()
+    ensure_seeded_runner()
     if "--launch" in sys.argv:
         idx = sys.argv.index("--launch")
         if idx + 1 >= len(sys.argv):

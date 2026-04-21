@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import stat
 import tempfile
@@ -13,12 +12,14 @@ import requests
 from PyQt6.QtCore import QThread
 
 from crucible.core.paths import Paths
+from crucible.core.tar_utils import extract_tarball
 
 logger = logging.getLogger(__name__)
 
 _UMU_API_URL = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest"
 _DOWNLOAD_TIMEOUT_SECS = 30
 _GITHUB_API_TIMEOUT_SECS = 10
+_UMU_ZIPAPP_SUFFIX = "-zipapp.tar"
 _ALLOWED_DOWNLOAD_HOSTS = {
     "github.com",
     "objects.githubusercontent.com",
@@ -65,23 +66,30 @@ def _download_file(url: str, destination: Path) -> None:
             )
 
 
+def _archive_runner_path(extracted_root: Path) -> Path:
+    for candidate in (extracted_root / 'umu-run', extracted_root / 'umu' / 'umu-run'):
+        if candidate.is_file():
+            return candidate
+    raise ValueError("umu-run not found in downloaded archive")
+
+
 def _install_runner(download_url: str, dest: Path) -> None:
     if not _is_supported_download_url(download_url):
         raise ValueError(f"Unsupported umu-run download URL: {download_url}")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix='umu-run.', suffix='.tmp', dir=dest.parent)
-    os.close(fd)
-    tmp_path = Path(tmp_name)
-    try:
-        _download_file(download_url, tmp_path)
+    with tempfile.TemporaryDirectory(prefix='umu-run.', dir=dest.parent) as tmp_name:
+        tmp_dir = Path(tmp_name)
+        archive_path = tmp_dir / 'umu-launcher.zipapp.tar'
+        _download_file(download_url, archive_path)
+        extracted_root = extract_tarball(archive_path, tmp_dir / 'extract')
+        runner_src = _archive_runner_path(extracted_root)
+        tmp_path = tmp_dir / 'umu-run'
+        shutil.copy2(runner_src, tmp_path)
         if not tmp_path.exists() or tmp_path.stat().st_size == 0:
             raise ValueError("Downloaded umu-run is empty")
         tmp_path.chmod(tmp_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         tmp_path.replace(dest)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
 
 
 class UmuUpdateWorker(QThread):
@@ -119,12 +127,13 @@ class UmuUpdateWorker(QThread):
 
             download_url = None
             for asset in data.get("assets", []):
-                if asset.get("name") == "umu-run":
+                name = asset.get("name") or ""
+                if name == f"umu-launcher-{latest_tag}{_UMU_ZIPAPP_SUFFIX}" or name.endswith(_UMU_ZIPAPP_SUFFIX):
                     download_url = asset.get("browser_download_url")
                     break
 
             if not download_url:
-                logger.warning(f"umu-run: no 'umu-run' asset in release {latest_tag}")
+                logger.warning(f"umu-run: no portable zipapp asset in release {latest_tag}")
                 return
 
             _install_runner(download_url, dest)

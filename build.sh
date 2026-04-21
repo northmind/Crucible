@@ -38,6 +38,10 @@ fi
 APPIMAGETOOL="$SCRIPT_DIR/appimagetool-x86_64.AppImage"
 APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
 APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+UMU_VERSION="1.4.0"
+UMU_ARCHIVE="$SCRIPT_DIR/umu-launcher-${UMU_VERSION}-zipapp.tar"
+UMU_URL="https://github.com/Open-Wine-Components/umu-launcher/releases/download/${UMU_VERSION}/umu-launcher-${UMU_VERSION}-zipapp.tar"
+UMU_SHA256="138ce4b8843608a257d4bee88191ca78a989778bcefd8abb3c1d1aaac3ac6fb8"
 if [ ! -f "$APPIMAGETOOL" ]; then
     echo "Downloading appimagetool..."
     wget -q "$APPIMAGETOOL_URL" \
@@ -45,11 +49,24 @@ if [ ! -f "$APPIMAGETOOL" ]; then
     chmod +x "$APPIMAGETOOL"
 fi
 echo "$APPIMAGETOOL_SHA256  $APPIMAGETOOL" | sha256sum -c -
+if [ ! -f "$UMU_ARCHIVE" ]; then
+    echo "Downloading bundled umu-run seed..."
+    wget -q "$UMU_URL" -O "$UMU_ARCHIVE"
+fi
+echo "$UMU_SHA256  $UMU_ARCHIVE" | sha256sum -c -
 
 # --- Set up AppDir ---
 echo "Setting up AppDir..."
 rm -rf AppDir
 mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/crucible
+
+# --- Bundle portable umu-run seed ---
+mkdir -p AppDir/usr/share/crucible/bootstrap
+tar -xf "$UMU_ARCHIVE" -C AppDir/usr/share/crucible/bootstrap umu/umu-run
+mv AppDir/usr/share/crucible/bootstrap/umu/umu-run AppDir/usr/share/crucible/bootstrap/umu-run
+rmdir AppDir/usr/share/crucible/bootstrap/umu
+chmod +x AppDir/usr/share/crucible/bootstrap/umu-run
+printf '%s\n' "$UMU_VERSION" > AppDir/usr/share/crucible/bootstrap/umu-run.version
 
 # --- Copy and patch Python binary ---
 echo "Bundling Python ${PYTHON_VERSION}..."
