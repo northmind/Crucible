@@ -6,6 +6,8 @@ from crucible.core.paths import Paths
 
 logger = logging.getLogger(__name__)
 
+_LOG_LEVELS = {"info": logging.INFO, "debug": logging.DEBUG, "off": logging.CRITICAL + 1}
+
 
 def setup_logging() -> logging.Logger:
     """Remove old app logs and configure the root logger with file and console handlers.
@@ -41,3 +43,17 @@ def setup_logging() -> logging.Logger:
     logger.info(f"Logging initialized. Log file: {log_file}")
 
     return logger
+
+
+def apply_log_level(level_name: str) -> None:
+    """Update the console handler's log level at runtime.
+
+    Args:
+        level_name: One of ``"info"``, ``"debug"``, or ``"off"``.
+    """
+    level = _LOG_LEVELS.get(level_name, logging.INFO)
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and handler.stream is sys.stdout:
+            handler.setLevel(level)
+            break

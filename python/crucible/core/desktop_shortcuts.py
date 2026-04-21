@@ -2,11 +2,9 @@ from __future__ import annotations
 
 """Desktop shortcut creation and cleanup for game entries."""
 
-import hashlib
 import logging
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -39,9 +37,15 @@ class DesktopShortcutMixin:
         return DesktopShortcutMixin._desktop_dir() / f"crucible-{safe_name(game_name)}.desktop"
 
     @staticmethod
-    def _game_icon_path(game_name: str) -> Path:
-        """Return the cached icon path for a given game."""
-        return Paths.artwork_dir() / 'icons' / f'{safe_name(game_name)}.png'
+    def _game_icon_path(game_name: str, exe_path: str = '') -> Path:
+        """Return the cached icon path inside the game's artwork folder."""
+        import hashlib as _hl
+        if exe_path:
+            digest = _hl.sha1(exe_path.strip().lower().encode('utf-8')).hexdigest()[:16]
+            key = f'exe_{digest}'
+        else:
+            key = safe_name(game_name)
+        return Paths.artwork_dir() / key / 'icon.png'
 
     @staticmethod
     def _run_quiet(command: list[str]) -> None:
@@ -55,6 +59,12 @@ class DesktopShortcutMixin:
             )
         except (OSError, subprocess.SubprocessError) as exc:
             logger.debug(f"Quiet command {command[0]} failed: {exc}")
+
+    @staticmethod
+    def _desktop_exec_arg(value: str) -> str:
+        """Escape one argument for a .desktop Exec field."""
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
 
     @classmethod
     def _refresh_desktop_database(cls) -> None:
@@ -111,11 +121,17 @@ class DesktopShortcutMixin:
                     timeout=_ICON_EXTRACT_TIMEOUT_SECS,
                 )
 
-                def _res(p: Path) -> int:
+                def _rank(p: Path) -> tuple[int, int]:
+                    """Sort key: (resolution, file_size) — largest wins."""
                     m = re.search(r'_(\d+)x\d+x', p.name)
-                    return int(m.group(1)) if m else 0
+                    res = int(m.group(1)) if m else 0
+                    return (res, p.stat().st_size)
 
-                pngs = sorted(png_dir.glob('*.png'), key=_res, reverse=True)
+                # Filter out corrupt PNGs (< 2 KB for a 16x16 is already suspicious;
+                # a valid 256x256 is always well above this threshold).
+                _MIN_ICON_BYTES = 2048
+                pngs = [p for p in png_dir.glob('*.png') if p.stat().st_size >= _MIN_ICON_BYTES]
+                pngs.sort(key=_rank, reverse=True)
                 if not pngs:
                     return False
 
@@ -136,16 +152,15 @@ class DesktopShortcutMixin:
     def _find_artwork_icon(exe_path: str, game_name: str) -> str:
         """Return the path to cached Steam artwork if it exists, else empty string.
 
-        Mirrors the artwork key logic from :class:`ArtworkFetcher` — the key
-        is an SHA-1 of the exe path when available, otherwise falls back to
-        the artwork-safe game name.
+        Checks the per-game artwork folder for header artwork.
         """
+        import hashlib as _hl
         artwork_dir = Paths.artwork_dir()
         candidates: list[Path] = []
         if exe_path:
-            digest = hashlib.sha1(exe_path.strip().lower().encode('utf-8')).hexdigest()[:16]
-            candidates.append(artwork_dir / f'exe_{digest}.jpg')
-        candidates.append(artwork_dir / f'{safe_name(game_name)}.jpg')
+            digest = _hl.sha1(exe_path.strip().lower().encode('utf-8')).hexdigest()[:16]
+            candidates.append(artwork_dir / f'exe_{digest}' / 'header.jpg')
+        candidates.append(artwork_dir / safe_name(game_name) / 'header.jpg')
         for c in candidates:
             if c.exists():
                 return str(c)
@@ -153,20 +168,25 @@ class DesktopShortcutMixin:
 
     def _shortcut_exec_command(self, name: str) -> str:
         """Build the Exec= line for a game's .desktop file."""
+        quoted_name = self._desktop_exec_arg(name)
+        repo_root = Path(__file__).resolve().parents[3]
         appimage = os.environ.get('APPIMAGE', '')
         if appimage and Path(appimage).exists():
-            return f'"{appimage}" --launch {shlex.quote(name)}'
+            return f'{self._desktop_exec_arg(appimage)} --launch {quoted_name}'
 
         installed = shutil.which('crucible')
         if installed:
-            return f'{shlex.quote(installed)} --launch {shlex.quote(name)}'
+            return f'{self._desktop_exec_arg(installed)} --launch {quoted_name}'
 
-        repo_root = Path(__file__).resolve().parents[3]
-        run_script = repo_root / 'scripts' / 'run.py'
-        if run_script.exists():
-            return f'"{sys.executable}" "{run_script}" --launch {shlex.quote(name)}'
+        package_root = repo_root / 'python'
+        main_module = package_root / 'crucible' / '__main__.py'
+        if main_module.exists():
+            return (
+                f'env PYTHONPATH={self._desktop_exec_arg(str(package_root))} '
+                f'{self._desktop_exec_arg(sys.executable)} -m crucible --launch {quoted_name}'
+            )
 
-        return f'"{sys.executable}" -m crucible --launch {shlex.quote(name)}'
+        return f'{self._desktop_exec_arg(sys.executable)} -m crucible --launch {quoted_name}'
 
     def create_game_shortcut(self, game: GameDict) -> tuple[bool, str]:
         """Create a .desktop shortcut for a game; returns (success, path_or_error)."""
@@ -182,7 +202,7 @@ class DesktopShortcutMixin:
         icon = ""
         exe_path = game.get('exe_path', '')
         if exe_path:
-            icon_path = self._game_icon_path(name)
+            icon_path = self._game_icon_path(name, exe_path)
             if icon_path.exists():
                 icon = str(icon_path)
             elif self._extract_exe_icon(exe_path, icon_path):
@@ -215,13 +235,17 @@ class DesktopShortcutMixin:
             logger.error(f"Failed to create shortcut for {name}: {e}")
             return False, str(e)
 
-    def remove_game_shortcut(self, game_name: str) -> bool:
+    def remove_game_shortcut(self, game_name: str, exe_path: str = '') -> bool:
         """Delete the .desktop shortcut and cached icon for a game."""
         desktop_path = self._game_desktop_path(game_name)
         try:
             if desktop_path.exists():
                 desktop_path.unlink()
-            icon_path = self._game_icon_path(game_name)
+            if not exe_path and hasattr(self, '_gm'):
+                game = self._gm.get_game(game_name)
+                if game:
+                    exe_path = game.get('exe_path', '')
+            icon_path = self._game_icon_path(game_name, exe_path)
             if icon_path.exists():
                 icon_path.unlink()
             return True

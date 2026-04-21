@@ -8,14 +8,13 @@ from typing import TypedDict
 class GamescopeSettings(TypedDict, total=False):
     """Structured gamescope configuration.
 
-    Mirrors Heroic's ``GameScopeSettings`` interface.  All values are
-    strings so they round-trip through JSON without type coercion.
+    Mirrors Heroic's ``GameScopeSettings`` interface.  Boolean flags use
+    native ``bool``; remaining values are strings so they round-trip
+    through JSON without type coercion.
     """
 
-    enable_upscaling: bool
-    enable_limiter: bool
     enable_force_grab_cursor: bool
-    window_type: str         # "fullscreen" | "borderless" | "windowed"
+    window_type: str         # "fullscreen" | "borderless"
     game_width: str          # inner render width, e.g. "1280"
     game_height: str         # inner render height
     upscale_width: str       # gamescope output width
@@ -46,15 +45,22 @@ class GameDict(TypedDict, total=False):
     custom_overrides: str
     install_dir: str
     env_vars: dict[str, str]
+    disabled_env_vars: list[str]
     prefix_path: str
     fingerprint_lock: bool
     wrapper_command: str
     exe_match_mode: str
-    pre_launch_script: str
-    post_launch_script: str
+
     enable_gamemode: bool
+    enable_mangohud: bool
     enable_gamescope: bool
+    disabled_global_flags: list[str]
     gamescope_settings: GamescopeSettings
+
+    # Playtime tracking
+    playtime_seconds: int       # cumulative play time in seconds
+    last_played: str            # ISO 8601 timestamp of last session end
+
     game_file: str  # runtime-only, not persisted
 
 

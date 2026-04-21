@@ -4,19 +4,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# --- Devbox guard ---
-if [ -z "${DEVBOX_PROJECT_ROOT:-}" ]; then
-    echo "ERROR: This script must be run inside a devbox shell."
-    echo "  Run:  devbox run build"
-    echo "  Or:   devbox shell  then  ./build.sh"
+# --- Resolve project venv Python ---
+if [ ! -x .venv/bin/python3 ]; then
+    echo "ERROR: .venv/bin/python3 not found."
+    echo "  Create a virtualenv, install requirements.txt, then run ./build.sh"
     exit 1
 fi
 
-# --- Resolve devbox venv Python ---
+for tool in wget patchelf file strip ldd sha256sum; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "ERROR: required tool '$tool' not found on PATH."
+        exit 1
+    fi
+done
+
 VENV_PYTHON="$(readlink -f .venv/bin/python3)"
-PYTHON_VERSION="$(.venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-PYTHON_PREFIX="$(.venv/bin/python3 -c 'import sys; print(sys.base_prefix)')"
-SITE_PACKAGES=".venv/lib/python${PYTHON_VERSION}/site-packages"
+PYTHON_VERSION="$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+PYTHON_PREFIX="$("$VENV_PYTHON" -c 'import sys; print(sys.base_prefix)')"
+SITE_PACKAGES="$("$VENV_PYTHON" -c 'import site; print(site.getsitepackages()[0])')"
 
 echo "Python:        $VENV_PYTHON"
 echo "Prefix:        $PYTHON_PREFIX"
@@ -25,18 +30,21 @@ echo "Site-packages: $SITE_PACKAGES"
 
 if [ ! -d "$SITE_PACKAGES/PyQt6" ]; then
     echo "ERROR: PyQt6 not found in venv site-packages."
-    echo "  Run:  devbox run install"
+    echo "  Install dependencies from requirements.txt into .venv first"
     exit 1
 fi
 
 # --- Download appimagetool ---
 APPIMAGETOOL="$SCRIPT_DIR/appimagetool-x86_64.AppImage"
+APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
 if [ ! -f "$APPIMAGETOOL" ]; then
     echo "Downloading appimagetool..."
-    wget -q "https://github.com/AppImage/appimagetool/releases/latest/download/appimagetool-x86_64.AppImage" \
+    wget -q "$APPIMAGETOOL_URL" \
         -O "$APPIMAGETOOL"
     chmod +x "$APPIMAGETOOL"
 fi
+echo "$APPIMAGETOOL_SHA256  $APPIMAGETOOL" | sha256sum -c -
 
 # --- Set up AppDir ---
 echo "Setting up AppDir..."
@@ -81,8 +89,19 @@ _bundle_nix_deps() {
 _bundle_nix_deps "$VENV_PYTHON"
 
 # Also bundle libpython with proper symlinks
-LIBPYTHON_DIR="$(dirname "$VENV_PYTHON")/../lib"
-LIBPYTHON="$(readlink -f "$LIBPYTHON_DIR/libpython${PYTHON_VERSION}.so.1.0")"
+LIBPYTHON="$(ldd "$VENV_PYTHON" 2>/dev/null | awk '/libpython[0-9.]+\.so/{print $3; exit}')"
+if [ -z "$LIBPYTHON" ] || [ ! -f "$LIBPYTHON" ]; then
+    for candidate in \
+        "$PYTHON_PREFIX/lib/libpython${PYTHON_VERSION}.so.1.0" \
+        "$PYTHON_PREFIX/lib/libpython${PYTHON_VERSION}.so" \
+        "$PYTHON_PREFIX/lib/x86_64-linux-gnu/libpython${PYTHON_VERSION}.so.1.0" \
+        "$PYTHON_PREFIX/lib/x86_64-linux-gnu/libpython${PYTHON_VERSION}.so"; do
+        if [ -f "$candidate" ]; then
+            LIBPYTHON="$(readlink -f "$candidate")"
+            break
+        fi
+    done
+fi
 if [ -f "$LIBPYTHON" ]; then
     cp "$LIBPYTHON" "AppDir/usr/lib/libpython${PYTHON_VERSION}.so.1.0"
     chmod u+w "AppDir/usr/lib/libpython${PYTHON_VERSION}.so.1.0"
@@ -92,7 +111,7 @@ if [ -f "$LIBPYTHON" ]; then
     # Bundle libpython's own Nix deps too
     _bundle_nix_deps "$LIBPYTHON"
 else
-    echo "ERROR: libpython${PYTHON_VERSION}.so.1.0 not found at $LIBPYTHON_DIR"
+    echo "ERROR: libpython${PYTHON_VERSION} shared library not found"
     exit 1
 fi
 
@@ -113,15 +132,38 @@ rm -rf "AppDir/usr/lib/python${PYTHON_VERSION}/test" \
        "AppDir/usr/lib/python${PYTHON_VERSION}/turtle"*.py \
        "AppDir/usr/lib/python${PYTHON_VERSION}/turtledemo"
 
-# --- Copy site-packages ---
+# --- Copy site-packages (excluding dev-only packages) ---
 echo "Copying site-packages..."
 rm -rf "AppDir/usr/lib/python${PYTHON_VERSION}/site-packages"
+
+# Dev-only packages to exclude from the AppImage
+EXCLUDE_PKGS=(
+    mypy mypyc pip setuptools _distutils_hack distutils pkg_resources
+    pygments pytest _pytest coverage black blib2to3 blackd pathspec
+    platformdirs click iniconfig pluggy tomli exceptiongroup nodeenv
+    virtualenv filelock pre_commit cfgv identify
+)
+
 cp -rL "$SITE_PACKAGES" "AppDir/usr/lib/python${PYTHON_VERSION}/site-packages"
 
 # Fix Nix store read-only permissions on site-packages
 chmod -R u+w "AppDir/usr/lib/python${PYTHON_VERSION}/site-packages"
 
-# Strip __pycache__ to save space
+# Remove dev-only packages
+SP_DIR="AppDir/usr/lib/python${PYTHON_VERSION}/site-packages"
+for pkg in "${EXCLUDE_PKGS[@]}"; do
+    rm -rf "$SP_DIR/$pkg" "$SP_DIR/${pkg//-/_}"*.dist-info 2>/dev/null || true
+done
+
+# --- Strip unused Qt6 modules ---
+echo "Stripping unused Qt6 modules..."
+"$SCRIPT_DIR/scripts/strip-qt6.sh" "$PYTHON_VERSION"
+
+# --- Strip debug symbols from all bundled .so files ---
+echo "Stripping debug symbols..."
+find AppDir/usr/lib -name '*.so*' -type f -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+# Strip __pycache__ and .pyc to save space
 find AppDir/usr/lib -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # --- Patch RPATHs and bundle Nix deps for all .so files in AppDir ---
@@ -166,13 +208,13 @@ for tool in wrestool icotool; do
         done
         echo "  bundled $tool"
     else
-        echo "  WARNING: $tool not found — add icoutils to devbox.json"
+        echo "  WARNING: $tool not found on PATH"
     fi
 done
 
 # --- Convert icon ---
 echo "Converting icon..."
-.venv/bin/python3 -c "
+"$VENV_PYTHON" -c "
 from PIL import Image
 img = Image.open('python/crucible/assets/images/icon.jpg').convert('RGBA')
 img = img.resize((256, 256), Image.LANCZOS)
@@ -220,7 +262,7 @@ chmod +x AppDir/AppRun
 # --- Build AppImage ---
 echo "Building AppImage..."
 rm -f Crucible-x86_64.AppImage
-ARCH=x86_64 "$APPIMAGETOOL" AppDir Crucible-x86_64.AppImage
+ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run AppDir Crucible-x86_64.AppImage
 
 echo ""
 echo "Done: Crucible-x86_64.AppImage"

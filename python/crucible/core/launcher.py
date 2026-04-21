@@ -12,23 +12,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from crucible.core.paths import Paths, safe_name, clean_env
+from crucible.core.paths import safe_name, clean_env, find_game_root, find_app_id_in_game_dir
 from crucible.core.desktop_shortcuts import DesktopShortcutMixin
 from crucible.core.events import event_bus
 from crucible.core.game_state import GameState, GameStateTracker
+from crucible.core.game_utils import _build_dll_overrides, _load_json_file, _write_json_file
 from crucible.core.process_control import ProcessControlMixin, detached_fork
 from crucible.core.types import GameDict, LaunchContext
 from crucible.core.launch_env import (
     validate_launch_prereqs, resolve_prefix, validate_prefix,
-    prepare_log_dir, build_env, build_command, run_launch_script,
+    prepare_log_dir, build_env, build_command, resolve_proton_path,
 )
 
 if TYPE_CHECKING:
     from crucible.core.managers import GameManager
 
 logger = logging.getLogger(__name__)
-
-_STEAM_APPID_WALK_DEPTH = 8
 
 
 class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
@@ -66,24 +65,13 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
 
     @staticmethod
     def _resolve_appid(game: GameDict) -> str:
-        """Walk parent directories to find a steam_appid.txt."""
+        """Find a steam_appid.txt by locating the game root, then searching it."""
         exe_path = game.get('exe_path', '')
         if exe_path:
-            try:
-                search = Path(exe_path).parent
-                for _ in range(_STEAM_APPID_WALK_DEPTH):
-                    candidate = search / 'steam_appid.txt'
-                    if candidate.exists():
-                        val = candidate.read_text().strip()
-                        if val.isdigit():
-                            return val
-                        break
-                    if search.name.lower() in ('binaries', 'win64', 'win32', 'windows', 'engine'):
-                        search = search.parent
-                    else:
-                        break
-            except OSError as exc:
-                logger.debug(f"Failed to resolve Steam app id for {exe_path}: {exc}")
+            game_root = find_game_root(exe_path) or str(Path(exe_path).parent)
+            app_id = find_app_id_in_game_dir(game_root)
+            if app_id:
+                return app_id
         return 'umu-default'
 
     def launch_game(self, game_name: str) -> str:
@@ -103,13 +91,13 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
             self.state.force_idle(game_name)
         return result
 
-    # ------------------------------------------------------------------
-    # Pipeline phases
-    # ------------------------------------------------------------------
-
     def _validate_launch(self, game_name: str) -> tuple[LaunchContext | None, str]:
         """Phase 1: look up the game, check state, run pre-launch checks."""
         current = self.state.get(game_name)
+        if current in (GameState.RUNNING, GameState.STOPPING) and not self.is_game_running(game_name):
+            logger.info("Clearing stale state for exited game %s", game_name)
+            self.on_game_exited(game_name)
+            current = self.state.get(game_name)
         if current != GameState.IDLE:
             return None, f"Game '{game_name}' is already {current.value}."
 
@@ -117,26 +105,24 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
         if not game:
             return None, f"Game '{game_name}' not found."
 
-        error = validate_launch_prereqs(game, self._gm)
+        resolved = self._gm.global_config.resolve(game)
+
+        error = validate_launch_prereqs(resolved, self._gm)
         if error:
             return None, error
 
         if not self.state.transition(game_name, GameState.LAUNCHING):
             return None, f"Game '{game_name}' state changed concurrently."
 
-        event_bus.game_state_changed.emit(game_name, GameState.LAUNCHING.value)
-        return LaunchContext(game=game), ""
+        return LaunchContext(game=game, resolved=resolved), ""
 
     def _prepare_launch(self, ctx: LaunchContext, game_name: str) -> str:
         """Phase 2: resolve config, build env/command, prepare prefix + logs."""
-        ctx.resolved = self._gm.global_config.resolve(ctx.game)
+        if not ctx.resolved:
+            ctx.resolved = self._gm.global_config.resolve(ctx.game)
 
         ctx.exe_path = ctx.resolved['exe_path']
-        proton_version = ctx.resolved.get('proton_version', '')
-        ctx.proton_path = (
-            (self._gm.find_proton_path(proton_version) if proton_version else '')
-            or ctx.resolved.get('proton_path', '')
-        )
+        ctx.proton_path = resolve_proton_path(self._gm, ctx.resolved)
         ctx.umu = self._gm.find_umu_run()
         ctx.sname = safe_name(game_name)
 
@@ -152,7 +138,7 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
         ctx.env = build_env(
             ctx.resolved, game_name, ctx.sname, ctx.proton_path, ctx.prefix_path,
             self._resolve_appid, self._steam_id_for_name,
-            self._gm._build_dll_overrides,
+            _build_dll_overrides,
         )
         ctx.game_uuid = ctx.env['CRUCIBLE_GAME_ID']
         ctx.game_cmd = build_command(
@@ -165,73 +151,113 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
             else str(Path(ctx.exe_path).parent)
         )
 
-        pre_script = ctx.resolved.get('pre_launch_script', '')
-        if pre_script:
-            error = run_launch_script(pre_script, label="Pre-launch script")
-            if error:
-                return error
-
         return ""
 
     def _execute_launch(self, ctx: LaunchContext, game_name: str) -> str:
         """Phase 3: fork the process, register it, inhibit screensaver."""
         try:
-            pid = self._launch_detached(ctx.game_cmd, ctx.env, ctx.cwd, ctx.log_file_path)
+            pid = detached_fork(ctx.game_cmd, ctx.env, ctx.cwd, ctx.log_file_path)
             if not pid:
                 return "Failed to launch game process."
             ss_cookie = self._inhibit_screensaver()
             with self._running_lock:
                 self._running[game_name] = {
                     'pid': pid, 'uuid': ctx.game_uuid, 'ss_cookie': ss_cookie,
-                    'post_launch_script': ctx.resolved.get('post_launch_script', ''),
+                    'started_at': time.monotonic(),
                 }
             self.state.transition(game_name, GameState.RUNNING)
             event_bus.game_launched.emit(game_name)
-            event_bus.game_state_changed.emit(game_name, GameState.RUNNING.value)
+            threading.Thread(
+                target=self._watch_game_exit, args=(game_name, ctx.game_uuid), daemon=True,
+            ).start()
             return ""
         except OSError as e:
             logger.error(f"Failed to launch {game_name}: {e}")
             return str(e)
 
-    # ------------------------------------------------------------------
-    # State-aware overrides of ProcessControlMixin
-    # ------------------------------------------------------------------
-
     def stop_game(self, game_name: str) -> bool:
-        """Transition to STOPPING, then delegate to ProcessControlMixin."""
+        """Transition to STOPPING, record playtime, then delegate to ProcessControlMixin."""
+        with self._running_lock:
+            started_at = (self._running.get(game_name) or {}).pop('started_at', None)
         self.state.transition(game_name, GameState.STOPPING)
-        event_bus.game_state_changed.emit(game_name, GameState.STOPPING.value)
         result = super().stop_game(game_name)
-        self.state.force_idle(game_name)
-        event_bus.game_state_changed.emit(game_name, GameState.IDLE.value)
+
+        if started_at is not None:
+            elapsed = int(time.monotonic() - started_at)
+            if elapsed > 0:
+                self._record_playtime(game_name, elapsed)
+
         return result
 
     def on_game_exited(self, game_name: str) -> None:
-        """Clean up process record, run post-launch script, reset state."""
+        """Clean up process record, record playtime, and reset state."""
         with self._running_lock:
             entry = self._running.get(game_name)
-        post_script = entry.get('post_launch_script', '') if entry else ''
-        super().on_game_exited(game_name)
+            if entry and entry.get('cleanup_started'):
+                return
+            started_at = entry.pop('started_at', None) if entry else None
+            if entry:
+                entry['cleanup_started'] = True
+            elif self.state.get(game_name) == GameState.IDLE:
+                return
         self.state.force_idle(game_name)
+        super().on_game_exited(game_name)
+
+        if started_at is not None:
+            elapsed = int(time.monotonic() - started_at)
+            if elapsed > 0:
+                self._record_playtime(game_name, elapsed)
+
         event_bus.game_exited.emit(game_name)
-        event_bus.game_state_changed.emit(game_name, GameState.IDLE.value)
-        if post_script:
-            error = run_launch_script(post_script, label="Post-launch script")
-            if error:
-                logger.warning("Post-launch script failed for %s: %s", game_name, error)
 
-    # ------------------------------------------------------------------
-    # Double-fork detached launch
-    # ------------------------------------------------------------------
+    def _watch_game_exit(self, game_name: str, game_uuid: str) -> None:
+        """Watch a launched game and reconcile state after natural exit."""
+        while True:
+            with self._running_lock:
+                entry = self._running.get(game_name)
+                if not entry or entry.get('uuid') != game_uuid:
+                    return
+                if entry.get('stopping') or entry.get('cleanup_started'):
+                    return
+                pid = entry.get('pid', 0)
+            if pid:
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(1.0)
+                    continue
+                except PermissionError:
+                    time.sleep(1.0)
+                    continue
+                except ProcessLookupError:
+                    pass
+            if self._scan_uuid_pids(game_uuid):
+                time.sleep(1.0)
+                continue
+            self.on_game_exited(game_name)
+            return
 
-    @staticmethod
-    def _launch_detached(cmd: list[str], env: dict[str, str], cwd: str, log_file_path: Path) -> int:
-        """Double-fork to fully detach the game process from Crucible's tree."""
-        return detached_fork(cmd, env, cwd, log_file_path)
-
-    # ------------------------------------------------------------------
-    # Winetricks
-    # ------------------------------------------------------------------
+    def _record_playtime(self, game_name: str, elapsed_seconds: int) -> None:
+        """Persist cumulative playtime and last-played timestamp."""
+        game = self._gm.get_game(game_name)
+        if not game or not game.get('game_file'):
+            return
+        now_iso = datetime.now().astimezone().isoformat(timespec='seconds')
+        game_file = Path(game['game_file'])
+        try:
+            data = _load_json_file(game_file)
+            prev = data.get('playtime_seconds', 0) or 0
+            data['playtime_seconds'] = prev + elapsed_seconds
+            data['last_played'] = now_iso
+            _write_json_file(game_file, data)
+            # Update in-memory game entry directly to avoid a full rescan
+            game['playtime_seconds'] = data['playtime_seconds']
+            game['last_played'] = now_iso
+            logger.info(
+                f"Recorded {elapsed_seconds}s playtime for {game_name} "
+                f"(total: {prev + elapsed_seconds}s)"
+            )
+        except (OSError, ValueError) as exc:
+            logger.error(f"Failed to record playtime for {game_name}: {exc}")
 
     def launch_winetricks(self, prefix_path: str, proton_name: str | None = None) -> subprocess.Popen | None:
         """Launch winetricks GUI in the given prefix."""
@@ -260,10 +286,6 @@ class GameLauncher(DesktopShortcutMixin, ProcessControlMixin):
         except OSError as e:
             logger.error(f"Failed to launch winetricks: {e}")
             return None
-
-    # ------------------------------------------------------------------
-    # Prefix cleanup
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _clean_broken_prefix_symlinks(prefix_path: Path) -> None:

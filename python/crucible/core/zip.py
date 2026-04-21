@@ -39,11 +39,6 @@ def _validate_zip_members(zf: zipfile.ZipFile, dest_dir: Path) -> None:
         )
 
 
-def _open_zip(zip_path: str) -> zipfile.ZipFile:
-    """Open a ZIP file."""
-    return zipfile.ZipFile(zip_path, 'r')
-
-
 def extract(zip_path: str, dest_dir: str) -> ExtractedZipContents:
     """Extract a ZIP archive to dest_dir and return its DLL and EXE contents.
 
@@ -61,7 +56,7 @@ def extract(zip_path: str, dest_dir: str) -> ExtractedZipContents:
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
 
-    with _open_zip(zip_path) as zf:
+    with zipfile.ZipFile(zip_path, 'r') as zf:
         _validate_zip_members(zf, dest)
         zf.extractall(dest)
         names = zf.namelist()

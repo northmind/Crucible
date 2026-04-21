@@ -1,0 +1,228 @@
+/* Hero Modal - Steam Library Style (Theme Matched) */
+.hero-modal {
+    position: absolute; top: 32px; left: 0; right: 0; bottom: 0;
+    background-color: var(--bg-base);
+    z-index: 30;
+    display: flex; flex-direction: column;
+    transform: translateY(8px); opacity: 0;
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.12s ease;
+    pointer-events: none;
+    overflow: hidden;
+}
+.hero-modal.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
+
+.modal-close {
+    position: absolute; top: 24px; right: 24px;
+    width: 32px; height: 32px;
+    border-radius: 50%; background: var(--bg-glass);
+    backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1);
+    color: white; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; z-index: 40; transition: background 0.2s, transform 0.2s;
+}
+.modal-close:hover { background: rgba(255,255,255,0.2); transform: scale(1.1); }
+
+.hero-header {
+    position: relative; width: 100%;
+    height: clamp(180px, 35vh, 340px);
+    flex-shrink: 0; overflow: hidden; background: var(--bg-base);
+    display: flex; justify-content: center;
+}
+.hero-banner {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: center center; z-index: 1;
+}
+.hero-gradient {
+    position: absolute; inset: 0; z-index: 2;
+    background:
+        linear-gradient(to top, var(--bg-base) 0%, rgba(0,0,0,0.72) 25%, rgba(0,0,0,0.18) 55%, transparent 80%),
+        linear-gradient(to right, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.16) 32%, transparent 58%);
+}
+
+.steam-play-bar {
+    position: relative; z-index: 3;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 clamp(32px, 4vw, 64px); height: 64px;
+    margin-top: -64px;
+    margin-bottom: 0;
+    background: transparent;
+    flex-shrink: 0;
+}
+
+.hero-play-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 0 28px; height: 40px;
+    border-radius: 4px;
+    background: var(--accent); color: white; font-weight: 700; font-size: 14px;
+    border: none; cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: filter 0.2s, transform 0.1s;
+}
+.hero-play-btn:hover { filter: brightness(1.15); transform: scale(1.02); }
+.hero-play-btn:active { transform: scale(0.98); }
+.hero-play-btn.stop { background: #dc2626; box-shadow: 0 4px 16px rgba(220, 38, 38, 0.4); }
+
+.steam-meta-block { display: flex; flex-direction: column; gap: 2px; }
+.steam-meta-label {
+    font-size: 11px; color: rgba(255,255,255,0.74); text-transform: uppercase;
+    letter-spacing: 1px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,0.75);
+}
+.steam-meta-value {
+    font-size: 14px; color: #fff; font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+}
+
+
+.nav-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.nav-action-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 6px;
+    background: transparent; color: var(--text-muted);
+    cursor: pointer; border: none;
+    transition: background 0.15s, color 0.15s;
+}
+.nav-action-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-main); }
+.nav-action-btn.active { color: var(--accent); }
+
+.steam-nav-bar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 clamp(32px, 4vw, 64px); height: 48px;
+    background: rgba(9,9,11,0.85);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 2px solid var(--accent);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0; z-index: 3; position: relative;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.steam-nav-item {
+    color: var(--text-muted); font-size: 13px; font-weight: 500;
+    cursor: pointer; border: none; background: none;
+    height: 100%; display: flex; align-items: center;
+    border-bottom: 3px solid transparent; transition: color 0.2s;
+}
+.steam-nav-item:hover { color: var(--text-main); }
+.steam-nav-item.active { color: var(--text-main); border-bottom: 3px solid var(--accent); }
+
+/* Content area — scrollable */
+.modal-content-area {
+    flex: 1; min-height: 0;
+    background: var(--bg-base);
+    overflow-y: auto; overflow-x: hidden;
+    position: relative;
+}
+.modal-content-area::before {
+    content: ''; position: sticky; top: 0; left: 0; right: 0;
+    display: block; height: 16px; z-index: 2; pointer-events: none;
+    background: linear-gradient(var(--bg-base), transparent);
+}
+.modal-content-area::after {
+    content: ''; position: sticky; bottom: 0; left: 0; right: 0;
+    display: block; height: 16px; z-index: 2; pointer-events: none;
+    background: linear-gradient(transparent, var(--bg-base));
+    background: linear-gradient(transparent, var(--bg-base));
+}
+.modal-tab-content { display: none; }
+.modal-tab-content.active { display: block; animation: fadeInTab 0.15s ease forwards; }
+@keyframes fadeInTab {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Steam-style flat sections ===== */
+.sections {
+    padding: 12px clamp(32px, 4vw, 64px) 16px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.section {
+    padding: 14px 20px;
+    border-bottom: none;
+    background: var(--bg-surface);
+    border-radius: 8px;
+    margin-bottom: 12px;
+}
+.section:last-child { margin-bottom: 0; }
+.section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin: 16px 0 4px;
+}
+.sections > .section-title:first-child { margin-top: 0; }
+.section-title.danger { color: var(--danger); }
+.section-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+/* Setting row: label left, control right */
+.s-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 40px;
+    padding: 6px 0;
+}
+.s-row + .s-row {
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+.s-row-info { flex: 1; min-width: 0; padding-right: 24px; }
+.s-row-info h4 { font-size: 13px; font-weight: 500; }
+.s-row-info p { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 3px; }
+.s-row-desc { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+
+/* Field rows (stacked label + input) */
+.s-field { padding: 6px 0; }
+.s-field + .s-field { border-top: 1px solid rgba(255,255,255,0.04); }
+.s-field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.s-field label span { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 6px; }
+.s-field .input-row { display: flex; gap: 8px; }
+.s-field .input-row input { flex: 1; }
+
+/* Browse button */
+.browse-btn {
+    padding: 7px 14px; border-radius: var(--radius-md); font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer; background: rgba(255,255,255,0.08); color: var(--text-muted);
+    white-space: nowrap; font-family: inherit; flex-shrink: 0;
+}
+.browse-btn:hover { background: var(--accent); color: white; }
+
+/* Action buttons */
+.action-btn {
+    padding: 7px 16px; border-radius: var(--radius-md); font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer; white-space: nowrap; font-family: inherit; flex-shrink: 0;
+}
+.action-btn.secondary { background: rgba(255,255,255,0.08); color: var(--text-muted); }
+.action-btn.secondary:hover { background: var(--accent); color: white; }
+.action-btn.danger { background: rgba(239,68,68,0.1); color: var(--danger); }
+.action-btn.danger:hover { background: rgba(239,68,68,0.2); }
+
+/* Button row */
+.btn-row { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── Gamescope grids ── */
+
+
+/* ── Env table ── */
+.env-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+.env-table th {
+    font-weight: 500; color: var(--text-muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px; text-align: left; padding: 0 0 8px;
+}
+.env-table th + th { padding-left: 8px; }
+.env-table th:last-child { text-align: center; }
+.env-table td { padding: 4px 0; }
+.env-table td + td { padding-left: 8px; }
+.env-table td:last-child { text-align: center; }
+.env-table input { font-family: 'Fira Code', monospace; }
+
+.add-env-btn {
+    width: 24px; height: 24px; padding: 0; border: 1px solid var(--border);
+    border-radius: 4px; background: transparent; color: var(--text-muted);
+    font-size: 16px; line-height: 1; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.add-env-btn:hover { color: var(--text-main); border-color: var(--text-muted); }

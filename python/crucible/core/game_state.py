@@ -77,7 +77,3 @@ class GameStateTracker:
         with self._lock:
             self._states.pop(game_name, None)
 
-    def active_games(self) -> dict[str, GameState]:
-        """Return a snapshot of all non-IDLE games."""
-        with self._lock:
-            return dict(self._states)

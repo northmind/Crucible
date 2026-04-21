@@ -7,13 +7,13 @@ import os
 import resource
 import shlex
 import shutil
-import subprocess
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from crucible.core.paths import Paths, safe_name
-from crucible.core.types import GameDict, GamescopeSettings
+from crucible.core.types import GameDict
+from crucible.core.gamescope import build_gamescope_command
 
 if TYPE_CHECKING:
     from crucible.core.managers import GameManager
@@ -23,14 +23,19 @@ logger = logging.getLogger(__name__)
 _MIN_NOFILE_LIMIT = 524288
 
 
-def validate_launch_prereqs(game: GameDict, gm: GameManager) -> str:
-    """Return an error string if the game cannot be launched, else ''."""
-    exe_path = game['exe_path']
+def resolve_proton_path(gm: GameManager, game: GameDict) -> str:
+    """Resolve the Proton path from version name with fallback to stored path."""
     proton_version = game.get('proton_version', '')
-    proton_path = (
+    return (
         (gm.find_proton_path(proton_version) if proton_version else '')
         or game.get('proton_path', '')
     )
+
+
+def validate_launch_prereqs(game: GameDict, gm: GameManager) -> str:
+    """Return an error string if the game cannot be launched, else ''."""
+    exe_path = game['exe_path']
+    proton_path = resolve_proton_path(gm, game)
     if not Path(exe_path).exists():
         return f"Executable not found:\n{exe_path}"
     if not proton_path or not Path(proton_path).is_dir():
@@ -102,39 +107,6 @@ def validate_prefix(prefix_path: Path) -> str:
     )
 
 
-_SCRIPT_TIMEOUT_SECS = 30
-
-
-def run_launch_script(script_path: str, *, label: str = "script") -> str:
-    """Run a user-provided launch script.  Returns error string or ``""``.
-
-    The script must be an executable file.  It runs with a timeout and
-    inherits the current environment.  Non-zero exit is treated as a
-    blocking error for pre-launch scripts but only logged for post-launch.
-    """
-    if not script_path or not script_path.strip():
-        return ""
-    path = Path(script_path.strip())
-    if not path.is_file():
-        return f"{label} not found: {path}"
-    if not os.access(str(path), os.X_OK):
-        return f"{label} is not executable: {path}"
-    try:
-        result = subprocess.run(
-            [str(path)], timeout=_SCRIPT_TIMEOUT_SECS,
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.strip()[:200]
-            return f"{label} exited with code {result.returncode}" + (
-                f": {stderr}" if stderr else ""
-            )
-    except subprocess.TimeoutExpired:
-        return f"{label} timed out after {_SCRIPT_TIMEOUT_SECS}s"
-    except OSError as exc:
-        return f"Failed to run {label}: {exc}"
-    return ""
-
 
 def prepare_log_dir(game_name: str, timestamp_log_path: Callable[[Path], Path]) -> Path:
     """Clear old logs and return a fresh log file path."""
@@ -191,109 +163,12 @@ def build_env(game: GameDict, game_name: str, sname: str,
     if 'PULSE_LATENCY_MSEC' not in env:
         env['PULSE_LATENCY_MSEC'] = '60'
 
-    env.setdefault('__GL_SHADER_DISK_CACHE', '1')
-    shader_cache_dir = Paths.data_dir() / 'shader_cache' / sname
-    shader_cache_dir.mkdir(parents=True, exist_ok=True)
-    env.setdefault('__GL_SHADER_DISK_CACHE_PATH', str(shader_cache_dir))
-
     if env.get('PROTON_ENABLE_NVAPI') == '1':
         env.setdefault('DXVK_ENABLE_NVAPI', '1')
         env.setdefault('DXVK_NVAPI_ALLOW_OTHER_DRIVERS', '1')
 
     env['CRUCIBLE_GAME_ID'] = str(uuid.uuid4())
     return env
-
-
-def _detect_gamescope_version(gamescope_bin: str) -> bool:
-    """Return True if gamescope is "new" style (>= 3.12, has -F/--filter flag)."""
-    try:
-        result = subprocess.run(
-            [gamescope_bin, "--help"],
-            capture_output=True, text=True, timeout=5,
-        )
-        return "-F, --filter" in (result.stderr or "")
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def build_gamescope_command(settings: GamescopeSettings) -> list[str]:
-    """Convert structured gamescope settings into a CLI prefix list.
-
-    Returns an empty list if gamescope is disabled or not installed.
-    The returned list ends with ``--`` so the caller can append the game
-    command directly.
-
-    Flag mapping matches Heroic Games Launcher (v2.x):
-      -w/-h   game render resolution
-      -W/-H   gamescope output resolution
-      -F fsr/-U   upscale method (new/old)
-      -f/-b       window type
-      -r/-o       FPS limiter
-      --force-grab-cursor
-    """
-    has_upscale = settings.get("enable_upscaling", False)
-    has_limiter = settings.get("enable_limiter", False)
-    if not has_upscale and not has_limiter:
-        return []
-
-    gamescope_bin = shutil.which("gamescope")
-    if not gamescope_bin:
-        logger.warning("Gamescope enabled but 'gamescope' not found on PATH.")
-        return []
-
-    new_version = _detect_gamescope_version(gamescope_bin)
-    cmd: list[str] = [gamescope_bin]
-
-    if has_upscale:
-        gw = settings.get("game_width", "")
-        gh = settings.get("game_height", "")
-        uw = settings.get("upscale_width", "")
-        uh = settings.get("upscale_height", "")
-        if gw:
-            cmd += ["-w", gw]
-        if gh:
-            cmd += ["-h", gh]
-        if uw:
-            cmd += ["-W", uw]
-        if uh:
-            cmd += ["-H", uh]
-
-        method = settings.get("upscale_method", "")
-        if method == "fsr":
-            cmd += ["-F", "fsr"] if new_version else ["-U"]
-        elif method == "nis":
-            cmd += ["-F", "nis"] if new_version else ["-Y"]
-        elif method == "integer":
-            cmd += ["-S", "integer"] if new_version else ["-i"]
-        elif method == "stretch" and new_version:
-            cmd += ["-S", "stretch"]
-
-        wt = settings.get("window_type", "")
-        if wt == "fullscreen":
-            cmd.append("-f")
-        elif wt == "borderless":
-            cmd.append("-b")
-
-    if has_limiter:
-        fps = settings.get("fps_limiter", "")
-        fps_nf = settings.get("fps_limiter_no_focus", "")
-        if fps:
-            cmd += ["-r", fps]
-        if fps_nf:
-            cmd += ["-o", fps_nf]
-
-    if settings.get("enable_force_grab_cursor", False):
-        cmd.append("--force-grab-cursor")
-
-    extra = settings.get("additional_options", "").strip()
-    if extra:
-        try:
-            cmd += shlex.split(extra)
-        except ValueError as exc:
-            logger.warning("Could not parse gamescope additional_options: %s", exc)
-
-    cmd.append("--")
-    return cmd
 
 
 def build_command(game: GameDict, umu: str, exe_path: str,
@@ -323,6 +198,9 @@ def build_command(game: GameDict, umu: str, exe_path: str,
     if game.get('enable_gamemode') and shutil.which('gamemoderun'):
         game_cmd = ['gamemoderun'] + game_cmd
 
+    if game.get('enable_mangohud') and shutil.which('mangohud'):
+        game_cmd = ['mangohud'] + game_cmd
+
     if shutil.which('systemd-run'):
         game_cmd = [
             'systemd-run', '--user', '--scope',
@@ -334,6 +212,10 @@ def build_command(game: GameDict, umu: str, exe_path: str,
     if game.get('enable_gamescope'):
         gs_settings = game.get('gamescope_settings') or {}
         gs_cmd = build_gamescope_command(gs_settings)
+        if not gs_cmd:
+            gamescope_bin = shutil.which('gamescope')
+            if gamescope_bin:
+                gs_cmd = [gamescope_bin, '--']
         if gs_cmd:
             game_cmd = gs_cmd + game_cmd
 

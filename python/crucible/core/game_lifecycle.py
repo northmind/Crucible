@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import shutil
 from pathlib import Path
@@ -15,8 +14,6 @@ from crucible.core.paths import (
     find_game_root,
     safe_name,
 )
-from crucible.core.events import event_bus
-from crucible.core.types import GameDict
 
 if TYPE_CHECKING:
     from crucible.core.managers import GameManager
@@ -51,7 +48,6 @@ class GameLifecycleMixin:
                 if prefix_path.exists():
                     shutil.rmtree(prefix_path)
             self.scan_games()
-            event_bus.game_removed.emit(name)
             return True
         except OSError as exc:
             logger.error(f"Failed to remove {name}: {exc}")
@@ -76,25 +72,25 @@ class GameLifecycleMixin:
             if not self.remove_game(name, remove_prefix=True):
                 return False
 
-            sname = safe_name(name)
             artwork_dir = Paths.artwork_dir()
-            artwork_safe = artwork_safe_name(name)
-            candidates: list[Path] = [artwork_dir / f"{artwork_safe}.jpg"]
-
             exe_path = game.get('exe_path', '')
+
+            # Delete per-game artwork folders
+            artwork_dirs_to_remove: list[Path] = []
             if exe_path:
                 exe_digest = hashlib.sha1(
                     exe_path.strip().lower().encode('utf-8'),
                 ).hexdigest()[:16]
-                candidates.append(artwork_dir / f"exe_{exe_digest}.jpg")
+                artwork_dirs_to_remove.append(artwork_dir / f'exe_{exe_digest}')
                 game_root = find_game_root(exe_path)
                 if game_root:
                     app_id = find_app_id_in_game_dir(game_root)
                     if app_id:
-                        candidates.append(artwork_dir / f"app_{app_id}.jpg")
-
-            candidates.append(Paths.artwork_dir() / 'icons' / f'{sname}.png')
-            self._delete_paths(candidates)
+                        artwork_dirs_to_remove.append(artwork_dir / f'app_{app_id}')
+            artwork_dirs_to_remove.append(artwork_dir / artwork_safe_name(name))
+            for d in artwork_dirs_to_remove:
+                if d.is_dir():
+                    shutil.rmtree(d, ignore_errors=True)
 
             game_log_dir = Paths.game_logs_dir(name)
             for log_file in game_log_dir.glob("*.log"):
@@ -173,11 +169,19 @@ class GameLifecycleMixin:
             data = self._load_game_record(game_file)
             data['name'] = new_name
             new_game_file = self.games_dir / f"{safe_name(new_name)}.json"
+            if new_game_file.exists() and game_file.resolve() != new_game_file.resolve():
+                existing = self._load_game_record(new_game_file)
+                if existing.get('name') != new_name:
+                    logger.error(
+                        "Refusing to rename %s to %s: safe_name collision with existing game %s",
+                        old_name, new_name, existing.get('name', new_game_file.stem),
+                    )
+                    return False
             self._write_game_record(new_game_file, data)
             if game_file.resolve() != new_game_file.resolve():
                 game_file.unlink()
             self.scan_games()
             return True
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             logger.error(f"Failed to rename {old_name} to {new_name}: {exc}")
             return False

@@ -7,6 +7,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Common game subdirectory names used by find_game_root() to walk up
+# past nested binary directories.  NOTE: also included in GENERIC_DIRS
+# below — additions here affect Steam API search term filtering too.
 _GAME_SUBDIR_NAMES = frozenset((
     "binaries", "bin", "win64", "win32", "x64", "x86", "x86_64", "windows",
     "engine", "game", "content", "app", "apps",
@@ -123,16 +126,20 @@ def clean_env() -> dict[str, str]:
     ``QT_PLUGIN_PATH`` and ``LD_LIBRARY_PATH`` are restored to their
     pre-AppImage values (saved by ``AppRun`` as ``CRUCIBLE_ORIG_*``).
     AppImage identity vars (``APPDIR``, ``APPIMAGE``, ``OWD``) are removed.
+
+    Returns a **new** dict — use for general child processes (``xdg-open``,
+    etc.).  For game/umu-run launching, use :func:`strip_launch_env` instead,
+    which mutates an existing env dict built by ``build_env()``.
     """
     env = os.environ.copy()
     if _is_appimage():
         for key in _APPIMAGE_SAVED_KEYS:
             _restore_or_remove(env, key)
-    for key in _APPIMAGE_KEYS:
-        if key not in _APPIMAGE_SAVED_KEYS:
+        for key in _APPIMAGE_KEYS:
+            if key not in _APPIMAGE_SAVED_KEYS:
+                env.pop(key, None)
+        for key in ('APPDIR', 'APPIMAGE', 'OWD'):
             env.pop(key, None)
-    for key in ('APPDIR', 'APPIMAGE', 'OWD'):
-        env.pop(key, None)
     return env
 
 
@@ -161,6 +168,10 @@ def strip_launch_env(env: dict[str, str]) -> None:
     In AppImage mode, ``CRUCIBLE_ORIG_*`` values (saved by ``AppRun``) are
     restored so child processes (games, umu-run) see the user's original
     environment rather than the AppImage's bundled paths.
+
+    Mutates *env* in place — designed for the game launch ``build_env()``
+    pipeline.  For a standalone clean copy of ``os.environ`` (e.g. for
+    ``xdg-open``), use :func:`clean_env` instead.
     """
     for key in _DESKTOP_LAUNCH_KEYS + _APPIMAGE_IDENTITY_KEYS:
         env.pop(key, None)

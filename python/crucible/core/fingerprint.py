@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import shutil
 import logging
-from datetime import datetime
 from pathlib import Path
 
 from crucible.core.paths import safe_name as _safe
@@ -33,13 +32,6 @@ class FingerprintManager:
         except OSError as e:
             logger.error(f"Failed to snapshot fingerprint for {game_name}: {e}")
             return False
-
-    def get_snapshot_date(self, game_name: str) -> str | None:
-        """Return the mtime of the cpuinfo snapshot as 'YYYY-MM-DD HH:MM', or None if absent."""
-        snap = self.fingerprints_dir / _safe(game_name) / 'cpuinfo'
-        if snap.exists():
-            return datetime.fromtimestamp(snap.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
-        return None
 
     def clear(self, game_name: str) -> None:
         """Remove the snapshot directory for a game, silently ignoring errors."""

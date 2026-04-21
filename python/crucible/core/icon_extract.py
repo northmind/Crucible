@@ -39,7 +39,12 @@ def _rva_to_offset(rva: int, sections: list[tuple[int, int, int, int]]) -> int |
     """Convert a Relative Virtual Address to a file offset using section table."""
     for va, va_size, raw_off, raw_size in sections:
         if va <= rva < va + va_size:
-            return raw_off + (rva - va)
+            delta = rva - va
+            # Reject if the offset falls beyond the section's raw data on disk
+            # (the remainder is zero-filled virtual padding, not backed by file data)
+            if delta >= raw_size:
+                return None
+            return raw_off + delta
     return None
 
 
@@ -67,6 +72,7 @@ def _walk_resource_dir(
     depth: int,
     path: tuple[int, ...],
     results: dict[tuple[int, ...], int],
+    sections: list[tuple[int, int, int, int]],
 ) -> None:
     """Recursively walk a PE IMAGE_RESOURCE_DIRECTORY tree.
 
@@ -93,16 +99,15 @@ def _walk_resource_dir(
         if offset_to_data & 0x80000000:
             # Points to a subdirectory
             sub_dir_off = offset_to_data & 0x7FFFFFFF
-            _walk_resource_dir(data, rsrc_offset, rsrc_rva, sub_dir_off, depth + 1, path + (eid,), results)
+            _walk_resource_dir(data, rsrc_offset, rsrc_rva, sub_dir_off, depth + 1, path + (eid,), results, sections)
         else:
             # Points to a data entry (IMAGE_RESOURCE_DATA_ENTRY)
             de_off = rsrc_offset + (offset_to_data & 0x7FFFFFFF)
             if de_off + 16 <= len(data):
                 data_rva = _read_u32(data, de_off)
                 data_size = _read_u32(data, de_off + 4)
-                # Convert RVA to file offset relative to rsrc section
-                file_off = rsrc_offset + (data_rva - rsrc_rva)
-                if 0 <= file_off < len(data) and file_off + data_size <= len(data):
+                file_off = _rva_to_offset(data_rva, sections)
+                if file_off is not None and file_off + data_size <= len(data):
                     results[path + (eid,)] = (file_off, data_size)
 
 
@@ -126,12 +131,8 @@ def _build_ico(
     if len(group_data) < 6 + count * 14:
         return None
 
-    # ICO header: reserved(2) + type(2) + count(2) = 6 bytes
-    # Each ICO directory entry: 16 bytes (vs 14 in the group)
-    header = struct.pack('<HHH', 0, 1, count)
-    entries_buf = io.BytesIO()
-    image_buf = io.BytesIO()
-    data_offset = 6 + count * 16  # offset where image data starts
+    # Collect valid entries first, then build the ICO with correct count.
+    ico_entries: list[tuple[bytes, bytes]] = []  # (dir_entry, image_data)
 
     for i in range(count):
         ge = 6 + i * 14  # GRPICONDIRENTRY offset
@@ -150,16 +151,41 @@ def _build_ico(
         img_offset, img_size = entry
         img_data = pe_data[img_offset:img_offset + img_size]
 
-        entries_buf.write(struct.pack(
+        # Validate icon data starts with a known header:
+        # - BMP: BITMAPINFOHEADER (0x28) or BITMAPV5HEADER (0x7C)
+        # - PNG: \x89PNG
+        if len(img_data) >= 4:
+            hdr32 = _read_u32(img_data, 0)
+            is_bmp = hdr32 in (0x28, 0x7C)
+            is_png = img_data[:4] == b'\x89PNG'
+            if not (is_bmp or is_png):
+                logger.debug("Skipping icon ordinal %d: unrecognized header 0x%08X", ordinal, hdr32)
+                continue
+
+        # dir_entry gets a placeholder offset; we fix it below
+        dir_entry = struct.pack(
             '<BBBBHHII',
             width, height, color_count, reserved,
-            planes, bit_count, len(img_data),
-            data_offset + image_buf.tell(),
-        ))
+            planes, bit_count, len(img_data), 0,
+        )
+        ico_entries.append((dir_entry, img_data))
+
+    if not ico_entries:
+        return None
+
+    actual_count = len(ico_entries)
+    header = struct.pack('<HHH', 0, 1, actual_count)
+    data_offset = 6 + actual_count * 16  # offset where image data starts
+
+    entries_buf = io.BytesIO()
+    image_buf = io.BytesIO()
+    for dir_entry, img_data in ico_entries:
+        # Patch the offset field (last 4 bytes of the 16-byte dir entry)
+        patched = dir_entry[:12] + struct.pack('<I', data_offset + image_buf.tell())
+        entries_buf.write(patched)
         image_buf.write(img_data)
 
-    result = header + entries_buf.getvalue() + image_buf.getvalue()
-    return result if len(result) > 6 else None
+    return header + entries_buf.getvalue() + image_buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +198,14 @@ def extract_icon_to_png(exe_path: str, output_path: Path) -> bool:
     Returns ``True`` on success.  On any parse failure the function returns
     ``False`` without raising.
     """
+    _MAX_EXE_SIZE = 512 * 1024 * 1024  # 512 MiB — refuse to load huge files into memory
     try:
-        data = Path(exe_path).read_bytes()
+        exe = Path(exe_path)
+        file_size = exe.stat().st_size
+        if file_size > _MAX_EXE_SIZE:
+            logger.debug("Exe too large for icon extraction (%d bytes): %s", file_size, exe_path)
+            return False
+        data = exe.read_bytes()
     except OSError as exc:
         logger.debug("Cannot read exe %s: %s", exe_path, exc)
         return False
@@ -226,7 +258,7 @@ def _extract(data: bytes, output_path: Path) -> bool:
 
     # ---- Walk resource tree ----
     resources: dict[tuple[int, ...], tuple[int, int]] = {}
-    _walk_resource_dir(data, rsrc_offset, rsrc_rva, 0, 0, (), resources)
+    _walk_resource_dir(data, rsrc_offset, rsrc_rva, 0, 0, (), resources, sections)
 
     # Collect RT_GROUP_ICON entries
     group_icons = {k: v for k, v in resources.items() if len(k) >= 1 and k[0] == _RT_GROUP_ICON}
@@ -264,10 +296,6 @@ def _extract(data: bytes, output_path: Path) -> bool:
     try:
         img = Image.open(io.BytesIO(best_ico))
         # If the ICO has multiple sizes, pick the largest
-        if hasattr(img, 'size'):
-            sizes = getattr(img.info, 'sizes', None)
-            # ICO files via Pillow: use .ico attribute to get sizes
-            pass
         # For multi-size ICOs, Pillow opens the largest by default
         # Ensure RGBA for clean PNG
         img = img.convert('RGBA')

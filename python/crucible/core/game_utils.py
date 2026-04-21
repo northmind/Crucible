@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 def _build_dll_overrides(custom_overrides: str = '') -> str:
     """Build WINEDLLOVERRIDES string from user-specified custom overrides."""
-    _ALIASES = {'native': 'n', 'builtin': 'b', 'disabled': ''}
-    _VALID_MODES = {'n,b', 'b,n', 'b', 'n', 'd', ''}
+    _ALIASES = {'native': 'n', 'builtin': 'b', 'disabled': 'd'}
+    _VALID_MODES = {'n,b', 'b,n', 'b', 'n', 'd'}
 
-    buckets: dict = {'n,b': [], 'b,n': [], 'b': [], 'n': [], 'd': [], '': []}
-    buckets[''].append('winemenubuilder')
+    buckets: dict = {'n,b': [], 'b,n': [], 'b': [], 'n': [], 'd': []}
+    buckets['d'].append('winemenubuilder')
 
     if custom_overrides:
         if '=' in custom_overrides:

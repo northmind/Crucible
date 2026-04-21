@@ -18,17 +18,6 @@ from crucible.core.paths import Paths
 
 logger = logging.getLogger(__name__)
 
-# Avoid circular import — event_bus is imported lazily in save().
-_event_bus = None
-
-
-def _get_event_bus():
-    global _event_bus
-    if _event_bus is None:
-        from crucible.core.events import event_bus
-        _event_bus = event_bus
-    return _event_bus
-
 # Keys that support inheritance (game value overrides global default).
 INHERITABLE_KEYS: tuple[str, ...] = (
     "proton_version",
@@ -37,11 +26,18 @@ INHERITABLE_KEYS: tuple[str, ...] = (
     "env_vars",
     "wrapper_command",
     "fingerprint_lock",
-    "pre_launch_script",
-    "post_launch_script",
+
     "enable_gamemode",
+    "enable_mangohud",
     "enable_gamescope",
     "gamescope_settings",
+)
+
+INHERITABLE_BOOL_KEYS: tuple[str, ...] = (
+    "fingerprint_lock",
+    "enable_gamemode",
+    "enable_mangohud",
+    "enable_gamescope",
 )
 
 # Default values for a fresh install — conservative, nothing enabled.
@@ -52,9 +48,9 @@ _FACTORY_DEFAULTS: dict[str, Any] = {
     "env_vars": {},
     "wrapper_command": "",
     "fingerprint_lock": False,
-    "pre_launch_script": "",
-    "post_launch_script": "",
+
     "enable_gamemode": False,
+    "enable_mangohud": False,
     "enable_gamescope": False,
     "gamescope_settings": {},
 }
@@ -89,7 +85,6 @@ class GlobalConfig:
         """Persist current global defaults to disk (atomic write)."""
         try:
             _write_json_file(self._path, self._data)
-            _get_event_bus().global_config_changed.emit()
         except OSError as exc:
             logger.error("Failed to save global config: %s", exc)
 
@@ -127,6 +122,12 @@ class GlobalConfig:
         "no override — use global default".
         """
         merged: dict[str, Any] = dict(game)
+        disabled_env_vars = {
+            str(key) for key in (game.get("disabled_env_vars") or []) if str(key).strip()
+        }
+        disabled_flags = {
+            str(key) for key in (game.get("disabled_global_flags") or []) if str(key).strip()
+        }
         for key in INHERITABLE_KEYS:
             global_val = self._data.get(key)
             game_val = game.get(key)
@@ -134,12 +135,19 @@ class GlobalConfig:
             if key in ("env_vars", "gamescope_settings"):
                 # Dict merge: global provides base, game overrides on top
                 base = dict(global_val) if isinstance(global_val, dict) else {}
+                if key == "env_vars" and disabled_env_vars:
+                    for env_key in disabled_env_vars:
+                        base.pop(env_key, None)
                 overlay = game_val if isinstance(game_val, dict) else {}
                 base.update(overlay)
                 merged[key] = base
-            elif key == "fingerprint_lock":
-                # Bool: game value wins if explicitly set, else global
-                if key not in game:
+            elif key in INHERITABLE_BOOL_KEYS:
+                # Legacy stored False inherits; explicit off is tracked separately.
+                if key in disabled_flags:
+                    merged[key] = False
+                elif game_val is True:
+                    merged[key] = True
+                elif global_val is not None:
                     merged[key] = global_val
             else:
                 # Scalar: empty/missing game value → use global

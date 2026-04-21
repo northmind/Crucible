@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-_HEX_COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
+_HEX_COLOR_RE = re.compile(r"^[0-9a-fA-F]{6}$")
 
 
 def hex_to_rgb(value: str) -> tuple[int, int, int]:
@@ -24,32 +24,6 @@ def mix_hex(a_hex: str, b_hex: str, amount: float) -> str:
     g = round(ag + (bg - ag) * amount)
     b = round(ab + (bb - ab) * amount)
     return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def shift_lightness(value: str, amount: int) -> str:
-    """Shift a hex color lighter or darker based on its current luminance."""
-    r, g, b = hex_to_rgb(value)
-    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-    delta = amount if luminance < 0.5 else -amount
-    r = max(0, min(255, r + delta))
-    g = max(0, min(255, g + delta))
-    b = max(0, min(255, b + delta))
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-def color_distance(a_hex: str, b_hex: str) -> int:
-    """Return the Manhattan distance between two hex colors in RGB space."""
-    ar, ag, ab = hex_to_rgb(a_hex)
-    br, bg, bb = hex_to_rgb(b_hex)
-    return abs(ar - br) + abs(ag - bg) + abs(ab - bb)
-
-
-def contrast_text(bg_hex: str) -> str:
-    """Return light or dark text color for readable contrast against *bg_hex*."""
-    r, g, b = hex_to_rgb(bg_hex)
-    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
-    return "#f3f1eb" if luminance < 0.55 else "#17191e"
-
 
 def validate_hex(value: str) -> str:
     """Validate and normalize a hex color string, raising ValueError if invalid."""

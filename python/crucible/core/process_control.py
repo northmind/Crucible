@@ -93,21 +93,30 @@ class ProcessControlMixin:
     """
 
     def is_game_running(self, game_name: str) -> bool:
-        """Return True if the game's top-level process is still alive."""
+        """Return True if the game's top-level process or any descendant is still alive."""
         with self._running_lock:
             entry = self._running.get(game_name)
         if not entry:
             return False
+        
         pid = entry.get('pid', 0)
-        if not pid:
-            return False
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
+        uuid_str = entry.get('uuid', '')
+
+        if pid:
+            try:
+                os.kill(pid, 0)
+                return True
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                return True
+        
+        if uuid_str:
+            pids = self._scan_uuid_pids(uuid_str)
+            if pids:
+                return True
+
+        return False
 
     def on_game_exited(self, game_name: str) -> None:
         """Clean up after a game exits: remove record, uninhibit screensaver."""
@@ -120,7 +129,9 @@ class ProcessControlMixin:
     def stop_game(self, game_name: str) -> bool:
         """Send SIGTERM to all game processes and schedule reap."""
         with self._running_lock:
-            entry = self._running.pop(game_name, None)
+            entry = self._running.get(game_name)
+            if entry is not None:
+                entry['stopping'] = True
         if not entry:
             return False
 
@@ -160,6 +171,8 @@ class ProcessControlMixin:
                     except OSError as exc:
                         logger.debug(f"Failed to probe pid {dpid}: {exc}")
                 if not alive:
+                    if hasattr(self, 'on_game_exited'):
+                        self.on_game_exited(game_name)
                     return
                 time.sleep(_REAP_POLL_INTERVAL_SECS)
             for dpid in pids:
@@ -167,6 +180,8 @@ class ProcessControlMixin:
                     os.kill(dpid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
                     pass
+            if hasattr(self, 'on_game_exited'):
+                self.on_game_exited(game_name)
 
         threading.Thread(target=_reap, daemon=True).start()
         return True
@@ -193,21 +208,6 @@ class ProcessControlMixin:
             except OSError as exc:
                 logger.debug(f"Failed to scan descendants for pid {p}: {exc}")
         return result
-
-    @staticmethod
-    def _read_proc_environ(pid: int) -> dict[str, str]:
-        """Read the environment variables of process *pid* from /proc."""
-        try:
-            data = Path(f'/proc/{pid}/environ').read_bytes()
-            result = {}
-            for entry in data.split(b'\x00'):
-                if b'=' in entry:
-                    k, _, v = entry.partition(b'=')
-                    result[k.decode(errors='replace')] = v.decode(errors='replace')
-            return result
-        except OSError as exc:
-            logger.debug(f"Failed to read environment for pid {pid}: {exc}")
-            return {}
 
     def _scan_uuid_pids(self, game_uuid: str) -> set[int]:
         """Scan /proc for processes carrying our CRUCIBLE_GAME_ID.

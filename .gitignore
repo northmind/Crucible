@@ -1,22 +1,32 @@
-# Ignore everything by default
+# Ignore everything by default.
 *
 
-# Allow only these
+# Keep repo metadata and build inputs.
 !.gitignore
 !.github/
-!.github/**
+!.github/workflows/
+!.github/workflows/release.yml
 !README.md
-!python/
-!python/**
 !build.sh
-!devbox.json
-!devbox.lock
 !requirements.txt
-!requirements-dev.txt
 
-# Re-ignore build artifacts inside python/
+# Keep only source files and required bundled assets.
+!python/
+!python/**/
+!python/**/*.py
+!python/**/*.html
+!python/**/*.css
+!python/**/*.js
+!python/**/*.jpg
+
+# Keep only the build helper script required by build.sh.
+!scripts/
+!scripts/strip-qt6.sh
+
+# Re-ignore generated files inside allowed trees.
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.o
 python/build/

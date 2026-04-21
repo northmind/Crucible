@@ -85,7 +85,4 @@ class SystemTrayIcon(QSystemTrayIcon):
         for name in sorted(self._running_names):
             self._running_menu.addAction(name)
 
-    def update_running_games(self, names: list[str]) -> None:
-        """Refresh the 'Running Games' submenu with current game list."""
-        self._running_names = list(names)
-        self._refresh_running_menu()
+

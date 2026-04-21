@@ -95,12 +95,29 @@ class _ArtworkFetcher:
             return f'app_{app_id}'
         return artwork_safe_name(game_name)
 
-    def get_artwork_path(
+    def get_game_artwork_dir(
         self, exe_path: str = '', app_id: str | None = None, game_name: str = '',
     ) -> Path:
-        """Return the local filesystem path where artwork for this game is stored."""
+        """Return the per-game artwork directory."""
         key = self._artwork_key(exe_path, app_id, game_name)
-        return self.artwork_dir / f'{key}.jpg'
+        return self.artwork_dir / key
+
+    def get_artwork_path(
+        self, exe_path: str = '', app_id: str | None = None, game_name: str = '',
+        variant: str = '',
+    ) -> Path:
+        """Return the local filesystem path where artwork is stored.
+
+        Each game gets its own subdirectory under the artwork root.
+
+        *variant* selects the artwork type:
+        - ``''``        — header (460x215, default)
+        - ``'portrait'``— library capsule (600x900)
+        - ``'hero'``    — library hero banner (~1920x620)
+        """
+        game_dir = self.get_game_artwork_dir(exe_path, app_id, game_name)
+        filename = variant if variant else 'header'
+        return game_dir / f'{filename}.jpg'
 
     # ------------------------------------------------------------------
     # Image download
@@ -114,6 +131,7 @@ class _ArtworkFetcher:
         try:
             resp = self.session.get(url, timeout=4)
             if resp.status_code == 200 and len(resp.content) > 1000:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
                 save_path.write_bytes(resp.content)
                 return True
             logger.debug(

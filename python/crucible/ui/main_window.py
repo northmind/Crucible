@@ -1,322 +1,271 @@
+"""Main application window — frameless QWebEngineView shell.
+
+Loads index.html via QWebEngineView, exposes WebBridge over QWebChannel,
+manages system tray, geometry save/restore, and edge resize handles.
+"""
+
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QVariantAnimation, QEasingCurve
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QApplication, QSizePolicy,
-)
-from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPalette, QResizeEvent
 
-from crucible.ui import styles
-from crucible.ui.titlebar import TitleBar
-from crucible.ui.nav_sidebar import NavSidebar
-from crucible.ui.side_panel_host import SidePanelHost, PANEL_DETAIL, PANEL_SETTINGS, PANEL_PROTON
+from PyQt6.QtCore import Qt, QTimer, QUrl, QEvent
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from PyQt6.QtWebChannel import QWebChannel
+
+from crucible.ui.app_settings import (
+    auto_update_umu,
+    custom_proton_dir,
+    minimize_to_tray,
+    restore_geometry,
+)
+from crucible.ui.web_bridge import WebBridge
 from crucible.ui.resize_handles import setup_resize_handles, update_resize_handles
-from crucible.ui.panel_animation import PanelAnimationMixin
-from crucible.ui.drag_drop import DragDropMixin
-from crucible.ui.game_events import GameEventsMixin
-from crucible.ui.game_library_list import GameLibraryListWidget
-from crucible.ui.detail_panel import GameDetailPanel, PANEL_W as DETAIL_PANEL_W
-from crucible.ui.settings_panel import SettingsPanel, PANEL_W as SETTINGS_PANEL_W
-from crucible.ui.proton_panel import ProtonPanel, PANEL_W as PROTON_PANEL_W
 from crucible.core.managers import GameManager
 from crucible.core.proton_manager import ProtonManager
 from crucible.core.workers import UmuUpdateWorker, register_worker
-from crucible.ui.notification import SlidingNotification
-from crucible.ui.tokens import SPACE_XL
 from crucible.ui.tray import SystemTrayIcon
 
+_WEB_DIR = Path(__file__).parent / "web"
 
-class MainWindow(PanelAnimationMixin, DragDropMixin, GameEventsMixin, QMainWindow):
-    """Top-level frameless window hosting the game library and side panels."""
+
+class _LocalPage(QWebEnginePage):
+    """Block navigation away from the bundled local UI."""
+
+    def __init__(self, web_root: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._web_root = web_root.resolve()
+
+    def acceptNavigationRequest(self, url, nav_type, is_main_frame):  # noqa: N802
+        del nav_type, is_main_frame
+        if not url.isLocalFile():
+            return False
+        try:
+            return Path(url.toLocalFile()).resolve().is_relative_to(self._web_root)
+        except OSError:
+            return False
+
+
+class MainWindow(QMainWindow):
+    """Frameless window hosting QWebEngineView with QWebChannel bridge."""
 
     def __init__(self) -> None:
         super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setMinimumSize(900, 560)
+        self.resize(1050, 660)
 
-        self._set_monospace_font()
         self.game_manager = GameManager()
         self.proton_manager = ProtonManager()
+        self._bridge = WebBridge(self.game_manager, self.proton_manager)
 
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumSize(980, 600)
-        self.resize(1128, 760)
+        self._view = QWebEngineView(self)
+        self._page = _LocalPage(_WEB_DIR, self._view)
+        self._view.setPage(self._page)
+        self.setCentralWidget(self._view)
 
-        central = QWidget()
-        central.setObjectName("CentralWidget")
-        central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        central.setStyleSheet(styles.central_widget())
-        self.setCentralWidget(central)
+        # Dark background before page loads — prevents white flash
+        self._view.page().setBackgroundColor(QColor("#09090b"))
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setStyleSheet("background-color: #09090b;")
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        central.setLayout(layout)
-
-        self.titlebar = TitleBar(self)
-        layout.addWidget(self.titlebar)
-
-        self.main_container = QWidget()
-        self.main_container.setObjectName("MainContainer")
-        self.main_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.main_container.setStyleSheet(styles.window_bg())
-        self.main_layout = QHBoxLayout(self.main_container)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
-
-        self.nav_sidebar = NavSidebar(self)
-        self.main_layout.addWidget(self.nav_sidebar)
-
-        self.library_widget = GameLibraryListWidget(self.game_manager)
-        self.library_widget.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
+        ws = self._view.settings()
+        ws.setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True,
         )
-        self.main_layout.addWidget(self.library_widget, 1)
 
-        self._panel_host = SidePanelHost(parent=central)
+        channel = QWebChannel(self._view.page())
+        channel.registerObject("bridge", self._bridge)
+        self._view.page().setWebChannel(channel)
 
-        self.detail_panel = GameDetailPanel(
-            self.library_widget.artwork_manager,
-            self.game_manager,
-            self.proton_manager,
-        )
-        self.settings_panel = SettingsPanel(
-            global_config=self.game_manager.global_config,
-            proton_manager=self.proton_manager,
-        )
-        self.settings_panel.accent_changed.connect(self.on_accent_changed)
-        self.proton_panel = ProtonPanel(self.proton_manager)
+        self._view.setUrl(QUrl.fromLocalFile(str(_WEB_DIR / "index.html")))
+        self._view.loadFinished.connect(self._on_load_finished)
 
-        self._panel_host.add_panel(PANEL_DETAIL, self.detail_panel)
-        self._panel_host.add_panel(PANEL_SETTINGS, self.settings_panel)
-        self._panel_host.add_panel(PANEL_PROTON, self.proton_panel)
-
-        self._panel_open = False
-        self._active_panel_key = None
-        self._return_panel_key = None
-        self._edit_panel_w = DETAIL_PANEL_W
-        self._panel_anim = QPropertyAnimation(self._panel_host, b"geometry")
-        self._panel_anim.setDuration(180)
-        self._panel_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self._margin_anim = QVariantAnimation(self)
-        self._margin_anim.setDuration(180)
-        self._margin_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._margin_anim.valueChanged.connect(self._on_panel_margin_changed)
-
-        self._panel_margin_right = 0
-        self._zip_drag_preview_active = False
-
-        self.nav_sidebar.set_active(None)
-        self._notification = SlidingNotification(central)
-        self._drag_preview = SlidingNotification(central, show_close=False)
-
-        layout.addWidget(self.main_container, 1)
-
-        self.resize_handles = setup_resize_handles(self)
-        self.setAcceptDrops(True)
-        self._connect_signals()
+        self._handles = setup_resize_handles(self)
 
         self._tray = SystemTrayIcon(self)
         self._tray.show()
-        self._minimize_to_tray = True
 
-        QTimer.singleShot(100, self._load_initial_data)
+        self._restore_geometry()
+        self._page_ready = False
+        QTimer.singleShot(500, self._install_drop_filter)
+
+    # -- Page load completion --------------------------------------------------
+
+    def _on_load_finished(self, ok: bool) -> None:
+        if ok and not self._page_ready:
+            self._page_ready = True
+            self.show()
+            self._load_initial_data()
+
+    # -- Drag-and-drop (event filter on QWebEngineView) ----------------------
+
+    def _install_drop_filter(self) -> None:
+        target = self._view.focusProxy() or self._view
+        target.setAcceptDrops(True)
+        target.installEventFilter(self)
+        self._drop_target = target
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        etype = event.type()
+        if obj is not getattr(self, "_drop_target", None):
+            return super().eventFilter(obj, event)
+
+        if etype == QEvent.Type.DragEnter:
+            accepted, msg = self._check_drag_accept(event.mimeData())
+            if accepted:
+                event.acceptProposedAction()
+                safe = msg.replace("'", "\\'")
+                self._run_js(f"window._showDragToast && _showDragToast('{safe}')")
+                return True
+            event.ignore()
+            return True
+
+        elif etype == QEvent.Type.DragMove:
+            accepted, _ = self._check_drag_accept(event.mimeData())
+            if accepted:
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+            return True
+
+        elif etype == QEvent.Type.DragLeave:
+            self._run_js("window._hideDragToast && _hideDragToast()")
+
+        elif etype == QEvent.Type.Drop:
+            self._run_js("window._hideDragToast && _hideDragToast()")
+            self._handle_drop(event.mimeData())
+            event.acceptProposedAction()
+            return True
+
+        return super().eventFilter(obj, event)
+
+    def _check_drag_accept(self, mime) -> tuple[bool, str]:
+        """Return (accepted, toast_message) based on file types and active view."""
+        if not mime.hasUrls():
+            return False, ""
+        view = self._bridge.active_view
+        has_exe = any(
+            u.isLocalFile() and u.toLocalFile().lower().endswith(".exe")
+            for u in mime.urls()
+        )
+        has_zip = any(
+            u.isLocalFile() and u.toLocalFile().lower().endswith(".zip")
+            for u in mime.urls()
+        )
+        if has_exe and view == "library":
+            return True, "Drop to add game"
+        if has_zip and view == "modal":
+            return True, "Drop to apply archive"
+        return False, ""
+
+    def _handle_drop(self, mime) -> None:
+        if not mime.hasUrls():
+            return
+        view = self._bridge.active_view
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            lower = path.lower()
+            if lower.endswith(".exe") and view == "library":
+                self._add_dropped_exe(path)
+            elif lower.endswith(".zip") and view == "modal":
+                self._apply_dropped_zip(path)
+
+    def _add_dropped_exe(self, exe_path: str) -> None:
+        result = self._bridge.addGame(exe_path)
+        if result.get("success"):
+            self._toast(f"Added {result['name']}")
+        else:
+            self._toast(result.get("error", "Failed to add game"), "error")
+
+    def _apply_dropped_zip(self, zip_path: str) -> None:
+        result = self._bridge.applyZipToGame(zip_path)
+        if not result.get("success"):
+            self._toast(result.get("error", "Extract failed"), "error")
+            return
+        dlls = result.get("added_dlls", [])
+        exe = result.get("exe", "")
+        self._show_extraction_toast(dlls, exe)
+        # Refresh the modal with updated game data
+        name = self._bridge.modal_game_name
+        if name:
+            safe = name.replace("'", "\\'")
+            self._run_js(f"if(window.openGameModal) openGameModal('{safe}')")
+
+    def _show_extraction_toast(self, dlls: list[str], exe: str) -> None:
+        if dlls and exe:
+            title = "Extracted — overrides set, exe found"
+        elif dlls:
+            title = "Extracted — overrides set"
+        elif exe:
+            title = "Extracted — exe found"
+        else:
+            self._toast("Archive extracted")
+            return
+        lines = [title]
+        for dll in dlls[:5]:
+            lines.append(f"· {dll}")
+        if len(dlls) > 5:
+            lines.append(f"+{len(dlls) - 5} more")
+        if exe:
+            lines.append(f"exe: {Path(exe).name}")
+        safe = "\n".join(lines).replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        self._run_js(f"if(window.showToast) showToast('{safe}', 'success')")
+
+    def _toast(self, msg: str, level: str = "success") -> None:
+        safe = msg.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        self._run_js(f"if(window.showToast) showToast('{safe}', '{level}')")
+
+    def _run_js(self, code: str) -> None:
+        self._view.page().runJavaScript(code)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        update_resize_handles(self._handles, self.width(), self.height())
+
+    def _restore_geometry(self) -> None:
+        if not restore_geometry():
+            return
+        from crucible.ui.theme_system import get_settings
+        geo = get_settings().value("window_geometry")
+        if geo is not None and isinstance(geo, dict):
+            self.setGeometry(
+                geo.get("x", 100), geo.get("y", 100),
+                geo.get("w", 1128), geo.get("h", 760),
+            )
 
     def closeEvent(self, event) -> None:
-        """Minimize to tray instead of quitting (when tray is available)."""
-        if self._minimize_to_tray and self._tray.isVisible():
-            event.ignore()
+        if minimize_to_tray() and self._tray.isVisible():
             self.hide()
-        else:
-            self._tray.hide()
-            super().closeEvent(event)
-
-    def _connect_signals(self) -> None:
-        """Wire up all inter-widget signals."""
-        self.titlebar.search_changed.connect(self.library_widget.filter_games)
-        self.library_widget.game_launch.connect(self._on_game_launch)
-        self.library_widget.game_stop.connect(self._on_game_stop)
-        self.library_widget.game_selected.connect(self._on_game_selected)
-        self.library_widget.game_deselected.connect(self._close_detail)
-        self.library_widget.browse_requested.connect(self.open_add_game)
-        self.library_widget.running_state_changed.connect(self._on_running_state_changed)
-        self.detail_panel.launch_requested.connect(self._on_game_launch)
-        self.detail_panel.stop_requested.connect(self._on_game_stop)
-        self.detail_panel.zip_drop.connect(self._on_zip_drop)
-        self.detail_panel.zip_drag_preview.connect(self._on_zip_drag_preview)
-        self.detail_panel.notification_requested.connect(self._show_notification)
-        self.detail_panel.closed.connect(self._close_detail)
-        self.detail_panel.game_updated.connect(self._on_game_updated)
-        self.detail_panel.game_deleted.connect(self._on_game_deleted)
-        self.detail_panel.panel_width_changed.connect(self._on_panel_width_changed)
-        self._panel_host.width_changed.connect(self._on_host_width_changed)
-        self.library_widget.artwork_manager.install_dir_resolved.connect(
-            self._on_install_dir_resolved,
-        )
-
-    # ------------------------------------------------------------------
-    # Panel width helpers
-    # ------------------------------------------------------------------
-
-    def _current_panel_width(self) -> int:
-        """Return the pixel width of the currently open panel, or 0."""
-        if self._active_panel_key is None:
-            return 0
-        return self._panel_width_for_key(self._active_panel_key)
-
-    def _panel_width_for_key(self, key: str | None) -> int:
-        """Return the width for a panel key, preferring user-resized width."""
-        custom = self._panel_host.get_custom_width()
-        if custom is not None:
-            return custom
-        if key == PANEL_DETAIL:
-            return self._edit_panel_w
-        if key == PANEL_SETTINGS:
-            return SETTINGS_PANEL_W
-        if key == PANEL_PROTON:
-            return PROTON_PANEL_W
-        return self._edit_panel_w
-
-    def _sync_titlebar_seam(self) -> None:
-        """Keep the titlebar right gap aligned with the panel width."""
-        self.titlebar.set_right_gap(self._current_panel_width())
-
-    def _on_panel_margin_changed(self, value: int) -> None:
-        self._panel_margin_right = int(value)
-        self._apply_main_layout_margins()
-        self.titlebar.set_right_gap(self._panel_margin_right)
-
-    def _apply_main_layout_margins(self) -> None:
-        self.main_layout.setContentsMargins(0, 0, self._panel_margin_right, 0)
-
-    def _on_host_width_changed(self, new_width: int) -> None:
-        """Respond to the user dragging the panel resize handle."""
-        if not self._panel_open:
+            event.ignore()
             return
-        self._panel_host.setGeometry(self._panel_geometry(True))
-        self._panel_margin_right = new_width
-        self._apply_main_layout_margins()
-        self._sync_titlebar_seam()
+        self._save_geometry()
+        super().closeEvent(event)
 
-    # ------------------------------------------------------------------
-    # Initialisation helpers
-    # ------------------------------------------------------------------
-
-    def _set_monospace_font(self) -> None:
-        """Select the best available monospace font for the application."""
-        preferred = ["Courier New", "Monospace", "Source Code Pro", "Consolas", "DejaVu Sans Mono"]
-        available = QFontDatabase.families()
-        selected = None
-        for family in preferred:
-            if family in available:
-                selected = family
-                break
-        if not selected:
-            mono = [f for f in available if 'mono' in f.lower() or 'courier' in f.lower()]
-            selected = mono[0] if mono else "Courier New"
-        font = QFont(selected, 10)
-        app = QApplication.instance()
-        if app:
-            app.setFont(font)
+    def _save_geometry(self) -> None:
+        if not restore_geometry():
+            return
+        from crucible.ui.theme_system import get_settings
+        g = self.geometry()
+        get_settings().setValue("window_geometry", {
+            "x": g.x(), "y": g.y(), "w": g.width(), "h": g.height(),
+        })
 
     def _load_initial_data(self) -> None:
-        """Scan games, proton versions, and kick off a UMU update check."""
+        extra = custom_proton_dir()
+        if extra:
+            self.proton_manager.add_search_dir(Path(extra))
         self.game_manager.scan_games()
         self.proton_manager.scan_installed()
-        self.library_widget.refresh()
-        worker = UmuUpdateWorker(parent=self)
-        register_worker(worker)
-        worker.start()
-
-    # ------------------------------------------------------------------
-    # Resize
-    # ------------------------------------------------------------------
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        """Reposition resize handles and panels on window resize."""
-        super().resizeEvent(event)
-        update_resize_handles(self.resize_handles, self.width(), self.height())
-        if self._panel_open and self._panel_anim.state() != self._panel_anim.State.Running:
-            self._panel_host.setGeometry(self._panel_geometry(True))
-        self._sync_titlebar_seam()
-        self._notification.reposition(anchor_y=self._notification_anchor_y())
-        self._drag_preview.reposition(anchor_y=self._drag_notice_anchor_y())
-
-    # ------------------------------------------------------------------
-    # Game management
-    # ------------------------------------------------------------------
-
-    def open_add_game(self) -> None:
-        """Open a file dialog to select a game executable."""
-        from crucible.ui.widgets import get_executable_path
-        exe_path = get_executable_path(self)
-        if exe_path:
-            self._add_game_from_path(exe_path)
-
-    def _add_game_from_path(self, exe_path: str) -> None:
-        """Derive a game name from the exe path and register it."""
-        from crucible.core.paths import display_name_from_exe, find_game_root
-        name = display_name_from_exe(exe_path)
-        install_dir = find_game_root(exe_path) or str(Path(exe_path).parent)
-        success = self.game_manager.add_game(
-            name=name, exe=exe_path, proton="", args="",
-            custom_overrides="", install_dir=install_dir,
-        )
-        if success:
-            self.library_widget.refresh()
-            self.library_widget.prefetch_artwork_for_game(name, exe_path)
-        else:
-            self._show_notification("Error", "Failed to add game. Check logs.", "error")
-
-    # ------------------------------------------------------------------
-    # Notifications
-    # ------------------------------------------------------------------
-
-    def _notification_anchor_y(self) -> int:
-        return self.titlebar.height() + SPACE_XL
-
-    def _show_notification(self, title: str, message: str, kind: str = "warning") -> None:
-        """Display a sliding notification banner."""
-        self._notification.show_message(title, message, kind, anchor_y=self._notification_anchor_y())
-        self._notification.raise_()
-
-    # ------------------------------------------------------------------
-    # Theme / accent
-    # ------------------------------------------------------------------
-
-    def on_accent_changed(self, color: str) -> None:
-        """Apply a new accent colour across the entire application palette."""
-        app = QApplication.instance()
-        if not app:
-            return
-        palette = app.palette()
-        c = QColor(color)
-        for role in (
-            QPalette.ColorRole.Highlight, QPalette.ColorRole.Link,
-            QPalette.ColorRole.ButtonText, QPalette.ColorRole.WindowText,
-            QPalette.ColorRole.Text,
-        ):
-            palette.setColor(role, c)
-        app.setPalette(palette)
-        self.refresh_colors()
-
-    def refresh_colors(self) -> None:
-        """Repaint all widgets after a theme or accent change."""
-        self.centralWidget().setStyleSheet(styles.central_widget())
-        self.main_container.setStyleSheet(styles.window_bg())
-        self.titlebar.refresh_colors()
-        self.nav_sidebar.refresh_colors()
-        self._panel_host.refresh_colors()
-        self.detail_panel.refresh_colors()
-        self.settings_panel.refresh_colors()
-        self.proton_panel.refresh_colors()
-        self._notification.refresh_colors()
-        self._drag_preview.refresh_colors()
-        accent = styles.get_accent()
-        self.library_widget.set_accent(accent)
-        app = QApplication.instance()
-        if app:
-            app.setStyleSheet(styles.tooltip())
+        self._bridge.gamesChanged.emit()
+        self._bridge.protonChanged.emit()
+        if auto_update_umu():
+            app = QApplication.instance()
+            worker = UmuUpdateWorker(parent=app)
+            register_worker(worker)
+            worker.start()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -11,7 +10,7 @@ from typing import Any
 from crucible.core.fingerprint import FingerprintManager
 from crucible.core.events import event_bus
 from crucible.core.game_lifecycle import GameLifecycleMixin
-from crucible.core.game_utils import _build_dll_overrides, _load_json_file, _write_json_file
+from crucible.core.game_utils import _load_json_file, _write_json_file
 from crucible.core.global_config import GlobalConfig
 from crucible.core.launcher import GameLauncher
 from crucible.core.types import GameDict
@@ -38,16 +37,11 @@ class GameManager(GameLifecycleMixin):
 
         self.launcher = GameLauncher(self)
 
-    # Static method wrappers — delegate to game_utils for backward compat
-    _build_dll_overrides = staticmethod(_build_dll_overrides)
-    _load_json_file = staticmethod(_load_json_file)
-    _write_json_file = staticmethod(_write_json_file)
-
     def _load_game_record(self, game_file: Path) -> dict[str, Any]:
-        return self._load_json_file(game_file)
+        return _load_json_file(game_file)
 
     def _write_game_record(self, game_file: Path, data: dict[str, Any]) -> None:
-        self._write_json_file(game_file, data)
+        _write_json_file(game_file, data)
 
     def _update_game_record(self, game_file: Path, updates: dict[str, Any]) -> bool:
         try:
@@ -55,21 +49,10 @@ class GameManager(GameLifecycleMixin):
             data.update(updates)
             self._write_game_record(game_file, data)
             self.scan_games()
-            game_name = data.get('name', '')
-            if game_name:
-                event_bus.game_updated.emit(game_name)
             return True
-        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        except (OSError, TypeError, ValueError) as exc:
             logger.error(f"Failed to update game record {game_file}: {exc}")
             return False
-
-    def _delete_paths(self, paths: list[Path]) -> None:
-        for path in paths:
-            try:
-                if path.exists():
-                    path.unlink()
-            except OSError as exc:
-                logger.error(f"Failed to delete {path}: {exc}")
 
     def find_umu_run(self) -> str | None:
         """Return the path to umu-run, checking runner_dir first then PATH.
@@ -101,11 +84,11 @@ class GameManager(GameLifecycleMixin):
                     if exe_path and Path(exe_path).exists():
                         data['install_dir'] = find_game_root(exe_path) or str(Path(exe_path).resolve().parent)
                     else:
-                        data['install_dir'] = str(game_file.parent)
+                        data['install_dir'] = ''
 
                 data['game_file'] = str(game_file)
                 self.games.append(data)
-            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError) as exc:
                 logger.error(f"Error reading {game_file}: {exc}")
         event_bus.library_refreshed.emit()
         return self.games
@@ -135,10 +118,10 @@ class GameManager(GameLifecycleMixin):
         wrapper_command: str = "",
         exe_match_mode: str = "auto",
         enable_gamemode: bool = False,
+        enable_mangohud: bool = False,
         enable_gamescope: bool = False,
         gamescope_settings: dict | None = None,
-        pre_launch_script: str = "",
-        post_launch_script: str = "",
+
     ) -> bool:
         """Create a new game JSON config and rescan the game list.
 
@@ -157,8 +140,6 @@ class GameManager(GameLifecycleMixin):
             enable_gamemode: Whether to enable gamemode for this game.
             enable_gamescope: Whether to enable gamescope for this game.
             gamescope_settings: Gamescope configuration dict.
-            pre_launch_script: Path to script run before launch.
-            post_launch_script: Path to script run after exit.
 
         Returns:
             True on success, False if the proton version is not found or
@@ -170,6 +151,55 @@ class GameManager(GameLifecycleMixin):
             return False
 
         game_file = self.games_dir / f"{safe_name(name)}.json"
+
+        if game_file.exists():
+            try:
+                existing = self._load_game_record(game_file)
+            except (OSError, TypeError, ValueError) as exc:
+                logger.error(f"Failed to read existing game during add: {exc}")
+                return False
+            if existing.get('name') != name:
+                logger.error(
+                    "Refusing to add %s: safe_name collision with existing game %s",
+                    name, existing.get('name', game_file.stem),
+                )
+                return False
+            updates = {
+                'exe_path': exe,
+                'proton_path': proton_path or '',
+                'proton_version': proton,
+                'launch_args': args,
+                'custom_overrides': custom_overrides,
+                'install_dir': install_dir,
+                'env_vars': env_vars or {},
+                'disabled_env_vars': existing.get('disabled_env_vars', []),
+                'prefix_path': prefix_path,
+                'fingerprint_lock': fingerprint_lock,
+                'wrapper_command': wrapper_command,
+                'exe_match_mode': exe_match_mode,
+                'disabled_global_flags': existing.get('disabled_global_flags', []),
+                'gamescope_settings': gamescope_settings or {},
+            }
+            if enable_gamemode:
+                updates['enable_gamemode'] = True
+            else:
+                existing.pop('enable_gamemode', None)
+            if enable_mangohud:
+                updates['enable_mangohud'] = True
+            else:
+                existing.pop('enable_mangohud', None)
+            if enable_gamescope:
+                updates['enable_gamescope'] = True
+            else:
+                existing.pop('enable_gamescope', None)
+            try:
+                existing.update(updates)
+                self._write_game_record(game_file, existing)
+                self.scan_games()
+                return True
+            except OSError as exc:
+                logger.error(f"Failed to update existing game: {exc}")
+                return False
         data = {
             'name': name,
             'exe_path': exe,
@@ -179,33 +209,37 @@ class GameManager(GameLifecycleMixin):
             'custom_overrides': custom_overrides,
             'install_dir': install_dir,
             'env_vars': env_vars or {},
+            'disabled_env_vars': [],
             'prefix_path': prefix_path,
             'fingerprint_lock': fingerprint_lock,
             'wrapper_command': wrapper_command,
             'exe_match_mode': exe_match_mode,
-            'enable_gamemode': enable_gamemode,
-            'enable_gamescope': enable_gamescope,
+            'disabled_global_flags': [],
             'gamescope_settings': gamescope_settings or {},
-            'pre_launch_script': pre_launch_script,
-            'post_launch_script': post_launch_script,
+            'playtime_seconds': 0,
+            'last_played': '',
         }
+        if enable_gamemode:
+            data['enable_gamemode'] = True
+        if enable_mangohud:
+            data['enable_mangohud'] = True
+        if enable_gamescope:
+            data['enable_gamescope'] = True
 
         try:
             self._write_game_record(game_file, data)
             self.scan_games()
-            event_bus.game_added.emit(name)
             return True
         except OSError as exc:
             logger.error(f"Failed to save game: {exc}")
             return False
 
-    def update_custom_overrides(self, game: GameDict, new_overrides: str) -> bool:
-        """Persist a new DLL override string for a game.
-
-        Returns:
-            True on success, False on I/O or parse error.
-        """
-        return self._update_game_record(Path(game['game_file']), {'custom_overrides': new_overrides})
+    def update_game_fields(self, game_name: str, updates: dict[str, Any]) -> bool:
+        """Persist arbitrary supported field updates for a game record."""
+        game = self.get_game(game_name)
+        if not game:
+            return False
+        return self._update_game_record(Path(game['game_file']), updates)
 
     def update_install_dir(self, game_name: str, install_dir: str) -> bool:
         """Set or update the auto-detected install directory for a game.
@@ -221,23 +255,11 @@ class GameManager(GameLifecycleMixin):
             return False
         return self._update_game_record(Path(game['game_file']), {'install_dir': install_dir})
 
-    def update_exe_path(self, game: GameDict, exe_path: str, *, exe_match_mode: str | None = None) -> bool:
-        """Update the executable path and optionally the exe_match_mode for a game.
-
-        Returns:
-            True on success, False on I/O or parse error.
-        """
-        updates = {'exe_path': exe_path}
-        if exe_match_mode is not None:
-            updates['exe_match_mode'] = exe_match_mode
-        return self._update_game_record(Path(game['game_file']), updates)
-
-    def get_default_prefix_path(self, game_name: str) -> Path:
-        """Return the default Wine prefix path for a game based on its safe_name."""
-        return self.prefixes_dir / f"{safe_name(game_name)}prefix"
-
     def find_proton_path(self, proton_name: str) -> str | None:
-        """Search ~/.steam/steam/compatibilitytools.d for a matching Proton directory.
+        """Search known Proton directories for a matching Proton installation.
+
+        Searches the default ``~/.steam/steam/compatibilitytools.d`` plus
+        any extra directories registered on the ProtonManager.
 
         Args:
             proton_name: Substring to match against directory names.
@@ -245,14 +267,28 @@ class GameManager(GameLifecycleMixin):
         Returns:
             Absolute path string to the Proton directory, or None if not found.
         """
-        steam_dir = Path.home() / ".steam/steam/compatibilitytools.d"
-        if not steam_dir.exists():
-            return None
-        for proton_dir in steam_dir.glob("*"):
-            if not proton_dir.is_dir():
+        search_dirs = [Path.home() / ".steam/steam/compatibilitytools.d"]
+        try:
+            from crucible.ui.app_settings import custom_proton_dir
+            extra = custom_proton_dir()
+            if extra:
+                search_dirs.append(Path(extra))
+        except Exception:
+            pass
+        candidates: list[Path] = []
+        for search_dir in search_dirs:
+            if not search_dir.exists():
                 continue
-            if proton_name in proton_dir.name and (proton_dir / "proton").exists():
-                return str(proton_dir)
+            for proton_dir in search_dir.glob("*"):
+                if not proton_dir.is_dir() or not (proton_dir / "proton").exists():
+                    continue
+                if proton_dir.name == proton_name:
+                    return str(proton_dir)
+                if proton_name in proton_dir.name:
+                    candidates.append(proton_dir)
+        unique_candidates = {str(path.resolve()) for path in candidates}
+        if len(unique_candidates) == 1:
+            return next(iter(unique_candidates))
         return None
 
     def is_game_running(self, game_name: str) -> bool:

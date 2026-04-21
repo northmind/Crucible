@@ -16,7 +16,7 @@ from crucible.core.paths import Paths
 
 logger = logging.getLogger(__name__)
 
-_UMU_API_URL = "https://api.github.com/repos/Faugus/umu-launcher/releases/latest"
+_UMU_API_URL = "https://api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest"
 _DOWNLOAD_TIMEOUT_SECS = 30
 _GITHUB_API_TIMEOUT_SECS = 10
 _ALLOWED_DOWNLOAD_HOSTS = {
@@ -49,10 +49,13 @@ def _is_supported_download_url(url: str) -> bool:
 
 def _download_file(url: str, destination: Path) -> None:
     resp = requests.get(url, timeout=_DOWNLOAD_TIMEOUT_SECS, stream=True)
-    resp.raise_for_status()
-    expected_size = int(resp.headers.get('content-length', 0)) or None
-    with destination.open('wb') as handle:
-        shutil.copyfileobj(resp.raw, handle)
+    try:
+        resp.raise_for_status()
+        expected_size = int(resp.headers.get('content-length', 0)) or None
+        with destination.open('wb') as handle:
+            shutil.copyfileobj(resp.raw, handle)
+    finally:
+        resp.close()
     if expected_size is not None:
         actual_size = destination.stat().st_size
         if actual_size != expected_size:

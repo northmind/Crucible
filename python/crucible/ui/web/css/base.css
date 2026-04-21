@@ -1,0 +1,46 @@
+:root {
+    --bg-base: #09090b;
+    --bg-surface: #18181b;
+    --bg-surface-hover: #27272a;
+    --bg-glass: rgba(24, 24, 27, 0.65);
+    --accent: #8b5cf6;
+    --accent-hover: #7c3aed;
+    --accent-transparent: rgba(139, 92, 246, 0.15);
+    --text-main: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --border: #27272a;
+    --danger: #ef4444;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --radius-pill: 9999px;
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.5), 0 2px 4px -1px rgba(0,0,0,0.3);
+    --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.8), 0 10px 10px -5px rgba(0,0,0,0.5);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family, 'Fira Code'), monospace;
+    background-color: var(--bg-base);
+    color: var(--text-main);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    user-select: none;
+}
+
+@keyframes pageFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInTab {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+*:focus { outline: none; }
