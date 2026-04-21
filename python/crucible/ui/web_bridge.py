@@ -118,8 +118,9 @@ class WebBridge(WebBridgeSettingsMixin, WebBridgeUIMixin, QObject):
     def addGame(self, exe_path: str) -> dict:
         name = display_name_from_exe(exe_path)
         install_dir = find_game_root(exe_path) or str(Path(exe_path).parent)
+        default_runner = str(self._gm.global_config.get("proton_version") or "")
         ok = self._gm.add_game(
-            name=name, exe=exe_path, proton="", args="",
+            name=name, exe=exe_path, proton=default_runner, args="",
             install_dir=install_dir,
         )
         if ok:

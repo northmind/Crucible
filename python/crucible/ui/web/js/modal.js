@@ -244,11 +244,18 @@ function bindRunnerSelect(container, g) {
     var sel = container.querySelector('#modal-runner');
     if (!sel) return;
     call('getRunnerNames').then(function(names) {
+        var current = g.proton_version || '';
         sel.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select Proton version';
+        placeholder.disabled = true;
+        if (!current) placeholder.selected = true;
+        sel.appendChild(placeholder);
         (names || []).forEach(function(n) {
             var opt = document.createElement('option');
             opt.value = n; opt.textContent = n;
-            if (n === g.proton_version) opt.selected = true;
+            if (n === current) opt.selected = true;
             sel.appendChild(opt);
         });
     });

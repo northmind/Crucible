@@ -235,16 +235,20 @@ function bindSettingsEvents(container) {
     var runnerSel = document.getElementById('settings-runner-select');
     if (runnerSel) {
         call('getRunnerNames').then(function(names) {
+            var currentRunner = _globalConfig.default_runner || '';
             runnerSel.innerHTML = '';
+            var placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Select default runner';
+            placeholder.disabled = true;
+            if (!currentRunner) placeholder.selected = true;
+            runnerSel.appendChild(placeholder);
             (names || []).forEach(function(n) {
                 var opt = document.createElement('option');
                 opt.value = n; opt.textContent = n;
-                if (n === _globalConfig.default_runner) opt.selected = true;
+                if (n === currentRunner) opt.selected = true;
                 runnerSel.appendChild(opt);
             });
-            if (!_globalConfig.default_runner && names && names.length) {
-                runnerSel.value = names[0];
-            }
         });
         runnerSel.addEventListener('change', function() {
             _globalConfig.default_runner = runnerSel.value;
