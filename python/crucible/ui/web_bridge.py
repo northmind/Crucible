@@ -67,6 +67,7 @@ class WebBridge(WebBridgeSettingsMixin, WebBridgeUIMixin, QObject):
     themeColorsChanged = pyqtSignal()
     portraitUpdated = pyqtSignal(str)  # exe_path
     heroUpdated = pyqtSignal(str)     # exe_path
+    artworkFetchFinished = pyqtSignal(str)
     gameRunningChanged = pyqtSignal(str, bool)
 
     def __init__(
@@ -91,6 +92,7 @@ class WebBridge(WebBridgeSettingsMixin, WebBridgeUIMixin, QObject):
         )
         self._artwork.portrait_ready.connect(self.portraitUpdated.emit)
         self._artwork.hero_ready.connect(self.heroUpdated.emit)
+        self._artwork.fetch_finished.connect(self.artworkFetchFinished.emit)
         self._artwork.name_fetched.connect(self._on_name_fetched)
         self._artwork.install_dir_resolved.connect(self._on_install_dir_resolved)
         self._connect_theme_signal()

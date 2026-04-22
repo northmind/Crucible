@@ -68,6 +68,23 @@ function clearPendingCardState(card) {
     if (img && img.getAttribute('src')) img.hidden = false;
 }
 
+function updateCardArtwork(exePath, path, bustCache) {
+    var cards = document.querySelectorAll('.game-card[data-exe="' + CSS.escape(exePath) + '"]');
+    cards.forEach(function(card) {
+        var img = card.querySelector('img');
+        if (img) {
+            if (path) {
+                img.src = 'file://' + path + (bustCache ? '?t=' + Date.now() : '');
+                img.hidden = false;
+            } else {
+                img.removeAttribute('src');
+                img.hidden = true;
+            }
+        }
+        clearPendingCardState(card);
+    });
+}
+
 function insertPendingGameCard(game) {
     if (!game || !game.exe_path) return;
     if (_pendingGameCards[game.exe_path]) return;
@@ -107,15 +124,14 @@ function createAddCard() {
 function onPortraitUpdated(exePath) {
     call('getPortraitArtworkPath', exePath).then(function(path) {
         if (!path) return;
-        var cards = document.querySelectorAll('.game-card[data-exe="' + CSS.escape(exePath) + '"]');
-        cards.forEach(function(card) {
-            var img = card.querySelector('img');
-            if (img) {
-                img.src = 'file://' + path + '?t=' + Date.now();
-                img.hidden = false;
-            }
-            clearPendingCardState(card);
-        });
+        updateCardArtwork(exePath, path, true);
+        delete _pendingGameCards[exePath];
+    });
+}
+
+function onArtworkFetchFinished(exePath) {
+    call('getPortraitArtworkPath', exePath).then(function(path) {
+        updateCardArtwork(exePath, path || '', true);
         delete _pendingGameCards[exePath];
     });
 }

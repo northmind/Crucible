@@ -18,6 +18,7 @@ _TAG_DIR = 'dir:'
 class ArtworkManager(QObject):
     portrait_ready       = pyqtSignal(str)                 # exe_path
     hero_ready           = pyqtSignal(str)                 # exe_path
+    fetch_finished       = pyqtSignal(str)                 # exe_path
     name_fetched         = pyqtSignal(str, str)
     install_dir_resolved = pyqtSignal(str, str)
     _fetch_done          = pyqtSignal(str, str, str, str)  # exe_path, game_name, path_str, extra
@@ -50,7 +51,11 @@ class ArtworkManager(QObject):
     def _do_fetch_guarded(self, key: str, game_name: str, exe_path: str, app_id: str | None) -> None:
         try:
             self._do_fetch(game_name, exe_path, app_id)
+        except Exception:
+            logger.exception("Unhandled artwork fetch failure for %s", exe_path or game_name)
         finally:
+            if exe_path:
+                self.fetch_finished.emit(exe_path)
             with self._in_flight_lock:
                 self._in_flight.discard(key)
 

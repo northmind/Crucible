@@ -43,16 +43,16 @@ class SystemTrayIcon(QSystemTrayIcon):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self._toggle_window()
 
+    def sync_toggle_action(self) -> None:
+        self._toggle_action.setText("Hide" if self._window.isVisible() else "Show")
+
     def _toggle_window(self) -> None:
         if self._window.isVisible():
             self._window.hide()
-            self._toggle_action.setText("Show")
         else:
-            self._window.showNormal()
-            self._window.activateWindow()
-            self._toggle_action.setText("Hide")
+            self._window.restore_and_activate()
+        self.sync_toggle_action()
 
     def _quit(self) -> None:
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
-

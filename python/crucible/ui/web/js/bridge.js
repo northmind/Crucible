@@ -39,6 +39,9 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
     bridge.heroUpdated.connect(function(exePath) {
         if (typeof onHeroUpdated === 'function') onHeroUpdated(exePath);
     });
+    bridge.artworkFetchFinished.connect(function(exePath) {
+        if (typeof onArtworkFetchFinished === 'function') onArtworkFetchFinished(exePath);
+    });
     bridge.downloadProgress.connect(function(data) {
         if (typeof onDownloadProgress === 'function') onDownloadProgress(data);
     });

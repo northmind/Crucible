@@ -232,6 +232,13 @@ class MainWindow(QMainWindow):
     def _run_js(self, code: str) -> None:
         self._view.page().runJavaScript(code)
 
+    def restore_and_activate(self) -> None:
+        self.show()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self._tray.sync_toggle_action()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         update_resize_handles(self._handles, self.width(), self.height())
@@ -250,6 +257,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if minimize_to_tray() and self._tray.isVisible():
             self.hide()
+            self._tray.sync_toggle_action()
             event.ignore()
             return
         self._save_geometry()
